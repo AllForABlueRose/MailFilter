@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Mail Analyzer</title>
+<meta charset="utf-8">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+  <div class="sidebar">
+    <h2>Mail Analyzer</h2>
+
+    <label>From Date/Time</label>
+    <input type="datetime-local" id="startDate">
+
+    <label>To Date/Time</label>
+    <input type="datetime-local" id="endDate">
+
+    <label>Main Keywords</label>
+    <div class="search-row">
+      <input type="text" id="mainKeywords" placeholder="server,error">
+      <button class="icon-btn" onclick="loadMail()" title="Search">🔍</button>
+    </div>
+
+    <label>Optional Keywords</label>
+    <input type="text" id="optionalKeywords" placeholder="urgent,critical">
+
+    <label>Exclude Keywords</label>
+    <input type="text" id="excludeKeywords" placeholder="spam,ads,newsletter">
+
+    <label>Sender</label>
+    <input type="text" id="senderFilter" placeholder="name or email">
+
+    <label>Recipient</label>
+    <input type="text" id="recipientFilter" placeholder="name or email">
+
+    <div class="status-group">
+      <div class="status-box">
+        <b>Last Refresh</b>
+        <div id="lastRefresh">Never</div>
+      </div>
+      <div class="status-box">
+        <b>Status</b>
+        <div id="fetchStatus">Unknown</div>
+      </div>
+      <button class="icon-btn refresh-btn" onclick="refreshMail()" title="Refresh Mail">⟳</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div id="mailContainer"></div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

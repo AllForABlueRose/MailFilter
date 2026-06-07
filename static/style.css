@@ -1,0 +1,97 @@
+body{
+    margin:0;
+    font-family:Arial;
+    background:#f3f4f6;
+}
+.container{
+    display:flex;
+    height:100vh;
+}
+.sidebar{
+    width:320px;
+    background:white;
+    padding:20px;
+    overflow:auto;
+    box-shadow:2px 0 10px rgba(0,0,0,0.1);
+}
+.content{
+    flex:1;
+    padding:20px;
+    overflow:auto;
+}
+.card{
+    background:white;
+    padding:16px;
+    border-radius:12px;
+    margin-bottom:16px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.1);
+}
+.thread{
+    border-left:6px solid #2563eb;
+}
+.single{
+    border-left:6px solid #10b981;
+}
+.highlight{
+    background:yellow;
+    font-weight:bold;
+}
+button{
+    width:100%;
+    padding:12px;
+    border:none;
+    border-radius:8px;
+    background:#2563eb;
+    color:white;
+    cursor:pointer;
+    margin-bottom:10px;
+}
+input{
+    width:100%;
+    padding:10px;
+    margin-bottom:12px;
+    box-sizing:border-box;
+}
+h3{
+    margin-top:0;
+}
+.meta{
+    color:#6b7280;
+    margin-bottom:10px;
+}
+.search-row{
+    display:flex;
+    gap:8px;
+    align-items:center;
+}
+.status-group{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+}
+.status-box{
+    flex:1;
+    margin-top:20px;
+    padding:12px;
+    background:#f9fafb;
+    border-radius:8px;
+    font-size:14px;
+}
+.icon-btn{
+    width:42px;
+    height:42px;
+    border:none;
+    border-radius:999px;
+    background:#2563eb;
+    color:white;
+    cursor:pointer;
+    font-size:18px;
+    flex-shrink:0;
+}
+.icon-btn:hover{
+    background:#1d4ed8;
+}
+.refresh-btn{
+    align-self:center;
+}

@@ -1,0 +1,178 @@
+"""Thread-safe mail cache: persistence, derived fields, thread detection.
+
+The MailStore is the single owner of all mutable state (the mail list and
+the fetch status). Every public method takes the internal lock, so it is
+safe to call from the Flask request threads, the background refresh
+thread, and ad-hoc /refresh threads at the same time.
+
+Keys prefixed with "_" (e.g. ``_received_dt``, ``_search_text``) are
+derived once at ingest time so filtering does no per-request parsing.
+They are stripped again before the cache is written to disk.
+"""
+
+import json
+import logging
+import os
+import threading
+from datetime import datetime
+from pathlib import Path
+
+from config import RECEIVED_FORMAT
+
+log = logging.getLogger(__name__)
+
+
+def _strip_derived(mail):
+    return {k: v for k, v in mail.items() if not k.startswith("_")}
+
+
+class MailStore:
+
+    def __init__(self, cache_file):
+        self._cache_file = Path(cache_file)
+        self._lock = threading.RLock()
+        self._mails = []
+        self._last_refresh = None
+        self._fetch_status = "Not started"
+        self._fetch_error = ""
+
+    # ----- persistence -----
+
+    def load(self):
+        if not self._cache_file.exists():
+            return
+        try:
+            with open(self._cache_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            log.exception("Cache load failed")
+            return
+        mails = []
+        for entry in raw:
+            try:
+                mails.append(self._with_derived(entry))
+            except Exception:
+                log.warning(
+                    "Skipping malformed cache entry: %r",
+                    entry.get("id", "<no id>") if isinstance(entry, dict) else entry,
+                )
+        with self._lock:
+            self._mails = mails
+            self._rebuild_threads()
+            self._sort()
+        log.info("Loaded %d mails from cache", len(mails))
+
+    def _save(self):
+        # Caller must hold the lock.
+        temp_file = self._cache_file.with_suffix(".json.tmp")
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(
+                [_strip_derived(m) for m in self._mails],
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+        os.replace(temp_file, self._cache_file)
+
+    # ----- derived fields -----
+
+    @staticmethod
+    def _with_derived(mail):
+        mail = dict(mail)
+        sender_text = " ".join(
+            [mail.get("sender", ""), mail.get("sender_email", "")]
+        ).lower()
+        recipient_text = " ".join(
+            mail.get("recipient_names", []) + mail.get("recipient_emails", [])
+        ).lower()
+        mail["_received_dt"] = datetime.strptime(mail["received"], RECEIVED_FORMAT)
+        mail["_sender_text"] = sender_text
+        mail["_recipient_text"] = recipient_text
+        mail["_search_text"] = "\n".join(
+            [
+                mail.get("subject", "").lower(),
+                mail.get("body", "").lower(),
+                sender_text,
+                recipient_text,
+            ]
+        )
+        return mail
+
+    # ----- mutation -----
+
+    def add_mails(self, new_mails):
+        """Ingest fetched mails (deduplicated by id). Returns how many were added."""
+        with self._lock:
+            existing = {m["id"] for m in self._mails}
+            added = 0
+            for mail in new_mails:
+                if mail["id"] in existing:
+                    continue
+                self._mails.append(self._with_derived(mail))
+                existing.add(mail["id"])
+                added += 1
+            if added:
+                self._rebuild_threads()
+                self._sort()
+                self._save()
+            return added
+
+    def _rebuild_threads(self):
+        # Caller must hold the lock.
+        counts = {}
+        for mail in self._mails:
+            cid = mail["conversation_id"]
+            counts[cid] = counts.get(cid, 0) + 1
+        for mail in self._mails:
+            mail["is_thread"] = counts[mail["conversation_id"]] > 1
+
+    def _sort(self):
+        # Caller must hold the lock. Newest first.
+        self._mails.sort(key=lambda m: m["_received_dt"], reverse=True)
+
+    # ----- reads -----
+
+    def snapshot(self):
+        """A consistent copy of the mail list, safe to iterate without the lock."""
+        with self._lock:
+            return list(self._mails)
+
+    def known_ids(self):
+        with self._lock:
+            return {m["id"] for m in self._mails}
+
+    def latest_received(self):
+        with self._lock:
+            if not self._mails:
+                return None
+            return max(m["_received_dt"] for m in self._mails)
+
+    # ----- fetch status -----
+
+    def set_fetching(self):
+        with self._lock:
+            self._fetch_status = "Fetching..."
+            self._fetch_error = ""
+
+    def set_success(self, fetched_count):
+        with self._lock:
+            self._last_refresh = datetime.now()
+            self._fetch_status = f"Success ({fetched_count} new)"
+            self._fetch_error = ""
+
+    def set_failure(self, error):
+        with self._lock:
+            self._fetch_status = "Failed"
+            self._fetch_error = str(error)
+
+    def status_snapshot(self):
+        with self._lock:
+            return {
+                "last_refresh": (
+                    self._last_refresh.strftime(RECEIVED_FORMAT)
+                    if self._last_refresh
+                    else "Never"
+                ),
+                "fetch_status": self._fetch_status,
+                "fetch_error": self._fetch_error,
+            }
