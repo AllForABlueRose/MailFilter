@@ -29,10 +29,15 @@ class RefreshScheduler:
         self._stop.set()
 
     def _run(self):
+        # Sleep first: the initial fetch is owned by the startup
+        # initializer (outlook.initialize), so the loop only handles the
+        # periodic refreshes that follow.
         while not self._stop.is_set():
+            # Interruptible sleep: stop() wakes it immediately.
+            self._stop.wait(self._interval)
+            if self._stop.is_set():
+                break
             try:
                 self._refresh()
             except Exception:
                 log.exception("Background refresh failed")
-            # Interruptible sleep: stop() wakes it immediately.
-            self._stop.wait(self._interval)

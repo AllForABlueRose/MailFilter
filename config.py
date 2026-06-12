@@ -6,6 +6,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Storage
 CACHE_FILE = BASE_DIR / "mail_cache.json"
+# Reserved for the upcoming targeted/bulk attachment download feature.
+# Single attachment downloads are streamed lazily from Outlook and never
+# persisted here (see outlook.fetch_attachment).
+ATTACHMENTS_DIR = BASE_DIR / "attachments"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Outlook

@@ -1,12 +1,19 @@
 """Outlook COM integration — the only module that touches pywin32.
 
-pywin32 is imported lazily inside ``_fetch_new`` so the rest of the app
+pywin32 is imported lazily (see ``_connect``) so the rest of the app
 imports and runs on machines without Outlook; a refresh there simply
 reports "Outlook integration unavailable" in the status box while the
 UI keeps serving cached mail.
+
+Attachments are handled lazily: a fetch records only each attachment's
+filename, and the bytes are pulled from Outlook on demand by
+``fetch_attachment`` when the user clicks a download link.
 """
 
 import logging
+import os
+import re
+import tempfile
 import threading
 from datetime import datetime
 
@@ -23,6 +30,48 @@ CO_E_CLASSSTRING = -2147221005
 
 class OutlookUnavailableError(RuntimeError):
     """Outlook cannot be reached on this machine (expected on dev boxes)."""
+
+
+def start_async(store):
+    """Initialize the Outlook Desktop integration in a background thread.
+
+    Returns the started daemon thread. Used at server startup so the web
+    server comes up immediately (serving cached mail) while Outlook is
+    brought online out of band.
+    """
+    thread = threading.Thread(
+        target=initialize,
+        args=(store,),
+        name="outlook-init",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def initialize(store):
+    """Bring up the Outlook Desktop integration at server startup.
+
+    Connects to classic Outlook desktop via COM and pulls the latest mail
+    into the store. Intended to run off the main thread (see
+    :func:`start_async`) so startup is never blocked waiting on Outlook.
+
+    On any failure the error has already been logged to the terminal by
+    :func:`refresh`; here we add an explicit notice that the app is falling
+    back to the on-disk mail cache, so the operator sees both lines.
+    """
+    log.info("Initializing Outlook Desktop in the background...")
+    refresh(store)
+    status = store.status_snapshot()
+    if status["fetch_status"] == "Failed":
+        log.warning(
+            "Outlook initialization failed (%s) — falling back to the mail "
+            "cache, serving %d message(s).",
+            status["fetch_error"],
+            len(store.snapshot()),
+        )
+    else:
+        log.info("Outlook initialization complete — %s.", status["fetch_status"])
 
 
 def refresh(store):
@@ -53,7 +102,8 @@ def refresh(store):
         _fetch_lock.release()
 
 
-def _fetch_new(since, known_ids):
+def _import_pywin32():
+    """Import pywin32, or raise OutlookUnavailableError if it is missing."""
     try:
         import pythoncom
         import pywintypes
@@ -63,26 +113,33 @@ def _fetch_new(since, known_ids):
             "Outlook integration unavailable on this machine "
             "(pywin32 not installed) — serving cached mail only"
         ) from e
+    return pythoncom, pywintypes, win32com
 
+
+def _dispatch(win32com, pywintypes):
+    """Connect to the Outlook.Application COM object (caller holds CoInitialize)."""
+    try:
+        return win32com.client.gencache.EnsureDispatch("Outlook.Application")
+    except pywintypes.com_error as e:
+        hresult = getattr(e, "hresult", None)
+        if hresult == CO_E_CLASSSTRING:
+            reason = (
+                "the Outlook.Application COM class is not registered — "
+                "classic Outlook desktop is not installed "
+                "(the 'new Outlook' app does not support COM automation)"
+            )
+        else:
+            reason = f"COM error {hresult}: {e}"
+        raise OutlookUnavailableError(
+            f"Outlook is unavailable: {reason}"
+        ) from e
+
+
+def _fetch_new(since, known_ids):
+    pythoncom, pywintypes, win32com = _import_pywin32()
     pythoncom.CoInitialize()
     try:
-        try:
-            outlook = win32com.client.gencache.EnsureDispatch(
-                "Outlook.Application"
-            )
-        except pywintypes.com_error as e:
-            hresult = getattr(e, "hresult", None)
-            if hresult == CO_E_CLASSSTRING:
-                reason = (
-                    "the Outlook.Application COM class is not registered — "
-                    "classic Outlook desktop is not installed "
-                    "(the 'new Outlook' app does not support COM automation)"
-                )
-            else:
-                reason = f"COM error {hresult}: {e}"
-            raise OutlookUnavailableError(
-                f"Outlook is unavailable: {reason} — serving cached mail only"
-            ) from e
+        outlook = _dispatch(win32com, pywintypes)
         namespace = outlook.GetNamespace("MAPI")
         inbox = namespace.GetDefaultFolder(OUTLOOK_INBOX_FOLDER)
         items = inbox.Items
@@ -155,4 +212,87 @@ def _parse_item(item, entry_id, received):
         "body": str(getattr(item, "Body", "")),
         "received": received.strftime(RECEIVED_FORMAT),
         "conversation_id": str(getattr(item, "ConversationID", entry_id)),
+        "attachments": _list_attachments(item),
     }
+
+
+# Characters that are unsafe in a path component, collapsed to "_".
+_UNSAFE_NAME_RE = re.compile(r"[^\w.\-]+")
+
+
+def _safe_component(name, fallback):
+    """Sanitize a string into a single safe path component."""
+    cleaned = _UNSAFE_NAME_RE.sub("_", name).strip("_.")
+    return cleaned or fallback
+
+
+def _list_attachments(item):
+    """Record each attachment's filename (no bytes saved — see fetch_attachment).
+
+    The order matches Outlook's collection, so a (mail id, index) pair is
+    enough to pull the actual bytes later.
+    """
+    try:
+        attachments = item.Attachments
+        count = int(attachments.Count)
+    except Exception:
+        return []
+    listed = []
+    for i in range(1, count + 1):  # Outlook collections are 1-indexed.
+        try:
+            listed.append({"filename": str(attachments.Item(i).FileName)})
+        except Exception:
+            log.exception("Failed to read attachment %d", i)
+            listed.append({"filename": f"attachment_{i}"})
+    return listed
+
+
+def fetch_attachment(entry_id, index):
+    """Lazily pull one attachment's bytes from Outlook by mail EntryID.
+
+    ``index`` is the 0-based position in the mail's attachment list (as stored
+    in the cache). Returns ``(filename, data)``. Raises OutlookUnavailableError
+    if Outlook can't be reached, or LookupError if the mail or attachment no
+    longer exists (e.g. it was deleted or moved since it was cached).
+
+    Safe to call from a Flask request thread: it does its own
+    CoInitialize/CoUninitialize.
+    """
+    pythoncom, pywintypes, win32com = _import_pywin32()
+    pythoncom.CoInitialize()
+    try:
+        outlook = _dispatch(win32com, pywintypes)
+        namespace = outlook.GetNamespace("MAPI")
+        try:
+            item = namespace.GetItemFromID(entry_id)
+        except pywintypes.com_error as e:
+            raise LookupError("mail no longer exists in Outlook") from e
+
+        attachments = item.Attachments
+        if index < 0 or index >= int(attachments.Count):
+            raise LookupError("attachment index out of range")
+        att = attachments.Item(index + 1)  # Outlook collections are 1-indexed.
+        filename = str(att.FileName)
+
+        # SaveAsFile needs a real path; write to a temp file, read it back,
+        # then remove it so nothing is persisted to disk.
+        tmp_dir = tempfile.mkdtemp(prefix="mailfilter_att_")
+        tmp_path = os.path.join(
+            tmp_dir, _safe_component(filename, f"attachment_{index}")
+        )
+        try:
+            att.SaveAsFile(tmp_path)
+            with open(tmp_path, "rb") as f:
+                data = f.read()
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            try:
+                os.rmdir(tmp_dir)
+            except OSError:
+                pass
+        return filename, data
+    finally:
+        pythoncom.CoUninitialize()

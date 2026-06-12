@@ -2,6 +2,7 @@
 
 import html
 import re
+from urllib.parse import quote
 
 from config import PREVIEW_CHARS
 
@@ -17,7 +18,25 @@ def to_view_model(mail, highlight_keywords):
         "preview": preview,
         "is_thread": mail["is_thread"],
         "icon": "🧵" if mail["is_thread"] else "✉️",
+        "attachments": _attachments(mail),
+        "links": mail.get("_links", []),
     }
+
+
+def _attachments(mail):
+    """Attachment filenames paired with their download URLs.
+
+    The URL is keyed by mail id + index, which the /attachments route maps
+    back to the stored file — so nothing from the body reaches the path.
+    """
+    mail_id = quote(str(mail.get("id", "")), safe="")
+    return [
+        {
+            "filename": att.get("filename", "attachment"),
+            "url": f"/attachments/{mail_id}/{i}",
+        }
+        for i, att in enumerate(mail.get("attachments", []))
+    ]
 
 
 def _highlight(escaped_text, keywords):

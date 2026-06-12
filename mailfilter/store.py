@@ -13,6 +13,7 @@ They are stripped again before the cache is written to disk.
 import json
 import logging
 import os
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,22 @@ from pathlib import Path
 from config import RECEIVED_FORMAT
 
 log = logging.getLogger(__name__)
+
+# Only http(s) URLs are treated as links: this keeps "javascript:" and other
+# schemes out of the clickable links the UI renders.
+_LINK_RE = re.compile(r"""https?://[^\s<>"')]+""")
+
+
+def extract_links(text):
+    """Return the unique http(s) URLs in ``text``, in first-seen order."""
+    seen = set()
+    links = []
+    for raw in _LINK_RE.findall(text or ""):
+        url = raw.rstrip(".,;:!?)'\"")
+        if url and url not in seen:
+            seen.add(url)
+            links.append(url)
+    return links
 
 
 def _strip_derived(mail):
@@ -88,6 +105,9 @@ class MailStore:
         mail["_received_dt"] = datetime.strptime(mail["received"], RECEIVED_FORMAT)
         mail["_sender_text"] = sender_text
         mail["_recipient_text"] = recipient_text
+        mail["_links"] = extract_links(mail.get("body", ""))
+        mail["_has_links"] = bool(mail["_links"])
+        mail["_has_attachments"] = bool(mail.get("attachments"))
         mail["_search_text"] = "\n".join(
             [
                 mail.get("subject", "").lower(),

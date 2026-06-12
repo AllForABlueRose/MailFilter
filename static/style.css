@@ -95,3 +95,40 @@ h3{
 .refresh-btn{
     align-self:center;
 }
+.toggle-btn{
+    background:#e5e7eb;
+    color:#374151;
+    font-weight:bold;
+}
+.toggle-btn.active{
+    background:#2563eb;
+    color:white;
+}
+.resources{
+    margin-top:12px;
+    padding-top:12px;
+    border-top:1px solid #e5e7eb;
+}
+.resource-group{
+    margin-bottom:8px;
+}
+.resource-group:last-child{
+    margin-bottom:0;
+}
+.resource-label{
+    font-size:13px;
+    font-weight:bold;
+    color:#374151;
+    margin-bottom:4px;
+}
+.resource-item{
+    display:block;
+    color:#2563eb;
+    text-decoration:none;
+    font-size:14px;
+    padding:2px 0;
+    word-break:break-all;
+}
+.resource-item:hover{
+    text-decoration:underline;
+}

@@ -33,6 +33,7 @@ class MailQuery:
     exclude: list = field(default_factory=list)     # lowercased
     sender: str = ""                                # lowercased
     recipient: str = ""                             # lowercased
+    resources_only: bool = False                    # attachments and/or links
 
     @classmethod
     def from_args(cls, args):
@@ -45,6 +46,7 @@ class MailQuery:
             exclude=[k.lower() for k in _split_keywords(args.get("exclude"))],
             sender=args.get("sender", "").strip().lower(),
             recipient=args.get("recipient", "").strip().lower(),
+            resources_only=args.get("resources") in ("1", "true", "on"),
         )
 
 
@@ -65,6 +67,10 @@ def filter_mails(mails, query):
         if query.sender and query.sender not in mail["_sender_text"]:
             continue
         if query.recipient and query.recipient not in mail["_recipient_text"]:
+            continue
+        if query.resources_only and not (
+            mail["_has_attachments"] or mail["_has_links"]
+        ):
             continue
         results.append(mail)
     return results
