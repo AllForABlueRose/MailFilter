@@ -3,7 +3,9 @@
 Dependency direction:
     routes -> filters/presenter -> store
     scheduler -> outlook -> store
-Only outlook.py knows pywin32 exists; only store.py owns mutable state.
+    store -> crypto            (cache protection at rest)
+Only outlook.py and crypto.py import pywin32 (both lazily); only store.py owns
+mutable state.
 """
 
 from flask import Flask

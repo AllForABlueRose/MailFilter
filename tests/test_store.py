@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
+from mailfilter import crypto
 from mailfilter.store import MailStore, extract_links, own_message_body
 from tests.factories import make_mail
 
@@ -136,14 +137,22 @@ class MutationTests(unittest.TestCase):
 
 
 class PersistenceTests(unittest.TestCase):
-    def test_save_strips_derived_fields_and_reload_round_trips(self):
+    def test_save_encodes_on_disk_and_reload_round_trips(self):
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d) / "cache.json"
             store = MailStore(cache)
             store.add_mails([make_mail(id="A"), make_mail(id="B", conversation_id="CONV1")])
 
-            # On-disk JSON must not contain any derived ("_"-prefixed) keys.
-            raw = json.loads(cache.read_text(encoding="utf-8"))
+            data = cache.read_bytes()
+            # The cache is encoded (not bare plaintext JSON) on disk.
+            self.assertTrue(data.startswith(crypto.MAGIC))
+            self.assertNotEqual(data.lstrip()[:1], b"[")
+
+            payload, alg = crypto.decode(data)
+            self.assertEqual(alg, crypto.preferred_alg())
+
+            # Decoded JSON must not contain any derived ("_"-prefixed) keys.
+            raw = json.loads(payload)
             self.assertEqual(len(raw), 2)
             for entry in raw:
                 self.assertFalse(
@@ -156,6 +165,17 @@ class PersistenceTests(unittest.TestCase):
             reloaded.load()
             self.assertEqual(reloaded.known_ids(), {"A", "B"})
             self.assertTrue(all("_received_dt" in m for m in reloaded.snapshot()))
+
+    def test_legacy_plaintext_cache_is_migrated_on_load(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d) / "cache.json"
+            # A pre-encryption cache: bare JSON, no header.
+            cache.write_text(json.dumps([make_mail(id="A")]), encoding="utf-8")
+            store = MailStore(cache)
+            store.load()
+            self.assertEqual(store.known_ids(), {"A"})
+            # Loading upgrades it away from plaintext to the encoded format.
+            self.assertTrue(cache.read_bytes().startswith(crypto.MAGIC))
 
     def test_load_skips_malformed_entries(self):
         with tempfile.TemporaryDirectory() as d:

@@ -20,6 +20,8 @@ from pathlib import Path
 
 from config import RECEIVED_FORMAT
 
+from . import crypto
+
 log = logging.getLogger(__name__)
 
 # Only http(s) URLs are treated as links: this keeps "javascript:" and other
@@ -82,8 +84,8 @@ class MailStore:
         if not self._cache_file.exists():
             return
         try:
-            with open(self._cache_file, "r", encoding="utf-8") as f:
-                raw = json.load(f)
+            payload, alg = crypto.decode(self._cache_file.read_bytes())
+            raw = json.loads(payload)
         except Exception:
             log.exception("Cache load failed")
             return
@@ -100,18 +102,26 @@ class MailStore:
             self._mails = mails
             self._rebuild_threads()
             self._sort()
+            # Upgrade the on-disk encoding if a stronger scheme is now available
+            # (legacy plaintext -> obfuscated/encrypted, or base64 -> DPAPI).
+            if alg != crypto.preferred_alg():
+                self._save()
+                log.info(
+                    "Migrated cache on disk to %s",
+                    crypto.alg_name(crypto.preferred_alg()),
+                )
         log.info("Loaded %d mails from cache", len(mails))
 
     def _save(self):
         # Caller must hold the lock.
+        payload = json.dumps(
+            [_strip_derived(m) for m in self._mails],
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
         temp_file = self._cache_file.with_suffix(".json.tmp")
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(
-                [_strip_derived(m) for m in self._mails],
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
+        with open(temp_file, "wb") as f:
+            f.write(crypto.encode(payload))
         os.replace(temp_file, self._cache_file)
 
     # ----- derived fields -----
