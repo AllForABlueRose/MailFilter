@@ -26,6 +26,29 @@ log = logging.getLogger(__name__)
 # schemes out of the clickable links the UI renders.
 _LINK_RE = re.compile(r"""https?://[^\s<>"')]+""")
 
+# Start of the quoted history in a reply/forward. A threaded message's body
+# carries the full quoted conversation beneath the new text, so link extraction
+# would otherwise surface every link from the whole thread on a single message.
+# We cut at the first of these boundaries so only the message's own links show.
+_QUOTE_BOUNDARY_RE = re.compile(
+    r"""
+      ^\s*-{2,}\s*Original\s+Message\s*-{2,}    # -----Original Message-----
+    | ^\s*_{5,}\s*$                              # Outlook underscore divider
+    | ^\s*From:\s.+$                             # Outlook reply/forward header
+    | ^\s*On\s.+\bwrote:\s*$                     # "On <date>, <name> wrote:"
+    | ^\s*>                                      # plain-text quoted line
+    """,
+    re.IGNORECASE | re.MULTILINE | re.VERBOSE,
+)
+
+
+def own_message_body(body):
+    """Return only the new portion of ``body``, dropping any quoted reply history."""
+    if not body:
+        return body or ""
+    match = _QUOTE_BOUNDARY_RE.search(body)
+    return body[: match.start()] if match else body
+
 
 def extract_links(text):
     """Return the unique http(s) URLs in ``text``, in first-seen order."""
@@ -105,7 +128,10 @@ class MailStore:
         mail["_received_dt"] = datetime.strptime(mail["received"], RECEIVED_FORMAT)
         mail["_sender_text"] = sender_text
         mail["_recipient_text"] = recipient_text
-        mail["_links"] = extract_links(mail.get("body", ""))
+        # Links come from this message's own text only — not the quoted thread
+        # history a reply carries below it. (Attachments are already per-item:
+        # Outlook scopes its Attachments collection to the single MailItem.)
+        mail["_links"] = extract_links(own_message_body(mail.get("body", "")))
         mail["_has_links"] = bool(mail["_links"])
         mail["_has_attachments"] = bool(mail.get("attachments"))
         mail["_search_text"] = "\n".join(

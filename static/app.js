@@ -72,8 +72,14 @@ function renderResources(mail){
         attachments.forEach(att => {
             const a = document.createElement('a');
             a.href = att.url;
-            a.textContent = att.filename;
             a.className = 'resource-item';
+            // A file-type icon for clarity, then the filename as text (it comes
+            // from mail content, so it must never be inserted as HTML).
+            const icon = document.createElement('span');
+            icon.className = 'file-icon';
+            icon.textContent = fileIcon(att.filename);
+            a.appendChild(icon);
+            a.appendChild(document.createTextNode(att.filename));
             group.appendChild(a);
         });
         wrap.appendChild(group);
@@ -103,6 +109,29 @@ function makeLabel(text){
     label.className = 'resource-label';
     label.textContent = text;
     return label;
+}
+
+// One glyph per broad file-type family, picked from the filename extension —
+// enough to tell at a glance what kind of file an attachment is.
+const FILE_ICONS = {
+    pdf:'📕',
+    doc:'📘', docx:'📘', odt:'📘', rtf:'📘',
+    txt:'📄', md:'📄', log:'📄',
+    xls:'📗', xlsx:'📗', csv:'📗', ods:'📗',
+    ppt:'📙', pptx:'📙', odp:'📙',
+    png:'🖼️', jpg:'🖼️', jpeg:'🖼️', gif:'🖼️', bmp:'🖼️', svg:'🖼️', webp:'🖼️', heic:'🖼️',
+    zip:'🗜️', rar:'🗜️', '7z':'🗜️', gz:'🗜️', tar:'🗜️',
+    mp3:'🎵', wav:'🎵', flac:'🎵', m4a:'🎵', ogg:'🎵',
+    mp4:'🎬', mov:'🎬', avi:'🎬', mkv:'🎬', webm:'🎬',
+    exe:'⚙️', msi:'⚙️', dmg:'⚙️',
+    json:'🔧', xml:'🔧', yml:'🔧', yaml:'🔧',
+    html:'🌐', htm:'🌐',
+};
+
+function fileIcon(filename){
+    const dot = filename.lastIndexOf('.');
+    const ext = dot > -1 ? filename.slice(dot + 1).toLowerCase() : '';
+    return FILE_ICONS[ext] || '📎';
 }
 
 loadMail();

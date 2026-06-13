@@ -25,6 +25,8 @@ body{
     border-radius:12px;
     margin-bottom:16px;
     box-shadow:0 2px 8px rgba(0,0,0,0.1);
+    /* Wrap long unbroken strings (tokens, URLs) instead of overflowing the card. */
+    overflow-wrap:anywhere;
 }
 .thread{
     border-left:6px solid #2563eb;
@@ -120,15 +122,35 @@ h3{
     font-weight:bold;
     color:#374151;
     margin-bottom:4px;
+    cursor:pointer;
+    user-select:none;
 }
+/* Caret that points right when collapsed, down when the group is hovered. */
+.resource-label::before{
+    content:"\25B8";
+    display:inline-block;
+    margin-right:6px;
+    color:#9ca3af;
+    transition:transform 0.15s ease;
+}
+.resource-group:hover .resource-label::before{
+    transform:rotate(90deg);
+}
+/* Items are collapsed by default and drop down when the group is hovered. */
 .resource-item{
-    display:block;
+    display:none;
     color:#2563eb;
     text-decoration:none;
     font-size:14px;
     padding:2px 0;
     word-break:break-all;
 }
+.resource-group:hover .resource-item{
+    display:block;
+}
 .resource-item:hover{
     text-decoration:underline;
+}
+.file-icon{
+    margin-right:6px;
 }
