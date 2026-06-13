@@ -95,20 +95,36 @@ async function loadMail(){
     const container = document.getElementById('mailContainer');
     container.innerHTML = '';
     data.mails.forEach(mail => {
-        const card = document.createElement('div');
-        card.className = `card ${mail.is_thread ? 'thread' : 'single'}`;
-        // subject/sender/preview are already HTML-escaped server-side.
-        card.innerHTML = `
-            <h3>${mail.icon} ${mail.subject}</h3>
-            <div class="meta">${mail.sender}<br>${mail.received}</div>
-            <div>${mail.preview}</div>
-        `;
-        const resources = renderResources(mail);
-        if(resources){
-            card.appendChild(resources);
+        const card = createCard(mail);
+        if(mail.is_thread){
+            card.classList.add('clickable');
+            card.title = 'Click to view the full thread';
+            card.addEventListener('click', e => {
+                // Let attachment/link clicks work; only the card body opens the thread.
+                if(e.target.closest('a')) return;
+                openThread(mail.id);
+            });
         }
         container.appendChild(card);
     });
+}
+
+// Build a mail card. Used by the list and the thread popup, so attachments
+// and links render identically in both.
+function createCard(mail){
+    const card = document.createElement('div');
+    card.className = `card ${mail.is_thread ? 'thread' : 'single'}`;
+    // subject/sender/preview are already HTML-escaped server-side.
+    card.innerHTML = `
+        <h3>${mail.icon} ${mail.subject}</h3>
+        <div class="meta">${mail.sender}<br>${mail.received}</div>
+        <div>${mail.preview}</div>
+    `;
+    const resources = renderResources(mail);
+    if(resources){
+        card.appendChild(resources);
+    }
+    return card;
 }
 
 // Build the attachments/links block with the DOM API so filenames and URLs
@@ -191,7 +207,60 @@ function fileIcon(filename){
     return FILE_ICONS[ext] || '📎';
 }
 
+// ----- thread popup -----
+let threadMails = [];
+let threadOldestFirst = true;
+
+async function openThread(mailId){
+    try{
+        // Pass the active search so matches highlight in the popup too.
+        const params = new URLSearchParams({
+            id: mailId,
+            main: document.getElementById('mainKeywords').value,
+            optional: document.getElementById('optionalKeywords').value,
+        });
+        const response = await fetch('/api/thread?' + params);
+        const data = await response.json();
+        threadMails = data.mails || [];
+        threadOldestFirst = true;   // earliest -> latest, top to bottom
+        renderThread();
+        document.getElementById('threadModal').hidden = false;
+    }catch(e){
+        // leave the list as-is on failure
+    }
+}
+
+function renderThread(){
+    const body = document.getElementById('threadBody');
+    body.innerHTML = '';
+    const ordered = threadOldestFirst ? threadMails : threadMails.slice().reverse();
+    ordered.forEach(mail => body.appendChild(createCard(mail)));
+
+    const count = threadMails.length;
+    document.getElementById('threadTitle').textContent =
+        `Thread — ${count} message${count === 1 ? '' : 's'}`;
+    document.getElementById('threadFlip').textContent =
+        threadOldestFirst ? 'Order: Oldest → Newest' : 'Order: Newest → Oldest';
+}
+
+function flipThreadOrder(){
+    threadOldestFirst = !threadOldestFirst;
+    renderThread();
+}
+
+function closeThread(){
+    document.getElementById('threadModal').hidden = true;
+}
+
 async function init(){
+    // Close the thread popup on a backdrop click or Escape.
+    document.getElementById('threadModal').addEventListener('click', e => {
+        if(e.target.id === 'threadModal'){ closeThread(); }
+    });
+    document.addEventListener('keydown', e => {
+        if(e.key === 'Escape'){ closeThread(); }
+    });
+
     await restoreSettings();   // repopulate the sidebar from the saved search
     loadMail();
     setInterval(loadMail, 30000);

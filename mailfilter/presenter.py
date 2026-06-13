@@ -16,6 +16,7 @@ def to_view_model(mail, main_node, optional_node):
     )
     preview = preview.replace("\n", "<br>")
     return {
+        "id": mail.get("id", ""),
         "subject": html.escape(mail.get("subject", "")),
         "sender": html.escape(mail.get("sender", "")),
         "received": mail["received"],

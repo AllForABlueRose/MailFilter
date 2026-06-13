@@ -36,6 +36,9 @@ class ToViewModelTests(unittest.TestCase):
         self.assertEqual(_view(is_thread=True)["icon"], "🧵")
         self.assertEqual(_view(is_thread=False)["icon"], "✉️")
 
+    def test_view_model_includes_id(self):
+        self.assertEqual(_view(id="ABC123")["id"], "ABC123")
+
     def test_attachment_urls_keyed_by_id_and_index(self):
         vm = _view(id="MAIL 1", attachments=[{"filename": "a.pdf"}, {"filename": "b.pdf"}])
         self.assertEqual(

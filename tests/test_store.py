@@ -136,6 +136,27 @@ class MutationTests(unittest.TestCase):
         self.assertEqual(self.store.latest_received(), datetime(2026, 6, 9, 8, 0, 0))
 
 
+class ThreadForTests(unittest.TestCase):
+    def setUp(self):
+        self.store = _temp_store()
+        self.store.add_mails([
+            make_mail(id="m1", conversation_id="C", received="2026-06-03 08:00:00"),
+            make_mail(id="m2", conversation_id="C", received="2026-06-01 08:00:00"),
+            make_mail(id="m3", conversation_id="C", received="2026-06-02 08:00:00"),
+            make_mail(id="other", conversation_id="D", received="2026-06-05 08:00:00"),
+        ])
+
+    def test_returns_conversation_members_earliest_first(self):
+        ids = [m["id"] for m in self.store.thread_for("m1")]
+        self.assertEqual(ids, ["m2", "m3", "m1"])  # ascending by received time
+
+    def test_excludes_other_conversations(self):
+        self.assertEqual([m["id"] for m in self.store.thread_for("other")], ["other"])
+
+    def test_unknown_id_returns_empty(self):
+        self.assertEqual(self.store.thread_for("nope"), [])
+
+
 class PersistenceTests(unittest.TestCase):
     def test_save_encodes_on_disk_and_reload_round_trips(self):
         with tempfile.TemporaryDirectory() as d:

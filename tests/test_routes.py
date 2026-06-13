@@ -88,6 +88,24 @@ class RouteTests(unittest.TestCase):
             time.sleep(0.01)
         fake.assert_called_once_with(self.store)
 
+    def test_thread_returns_conversation_earliest_first(self):
+        self.store.add_mails([
+            make_mail(id="T1", conversation_id="CT", received="2026-06-02 08:00:00"),
+            make_mail(id="T2", conversation_id="CT", received="2026-06-01 08:00:00"),
+        ])
+        data = self.client.get("/api/thread?id=T1").get_json()
+        self.assertEqual([m["id"] for m in data["mails"]], ["T2", "T1"])
+
+    def test_thread_unknown_id_is_empty(self):
+        self.assertEqual(self.client.get("/api/thread?id=nope").get_json()["mails"], [])
+
+    def test_thread_highlights_with_active_search(self):
+        self.store.add_mails([
+            make_mail(id="H1", conversation_id="HC", body="the server crashed"),
+        ])
+        data = self.client.get("/api/thread?id=H1&main=server").get_json()
+        self.assertIn('class="highlight-main"', data["mails"][0]["preview"])
+
     def test_attachment_unknown_mail_is_404(self):
         self.assertEqual(self.client.get("/attachments/NOPE/0").status_code, 404)
 

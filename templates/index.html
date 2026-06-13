@@ -62,6 +62,20 @@
     <div id="mailContainer"></div>
   </div>
 </div>
+
+<div id="threadModal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="threadTitle">Thread</h2>
+      <div class="modal-actions">
+        <button id="threadFlip" class="flip-btn" onclick="flipThreadOrder()">Order: Oldest → Newest</button>
+        <button class="icon-btn" onclick="closeThread()" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="threadBody" class="modal-body"></div>
+  </div>
+</div>
+
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

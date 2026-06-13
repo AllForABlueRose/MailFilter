@@ -62,6 +62,17 @@ def create_blueprint(store, settings):
             **status,
         })
 
+    @bp.get("/api/thread")
+    def api_thread():
+        # Every mail in the conversation, earliest-first. Highlight with the
+        # active search (main/optional) so matches stand out here too; a
+        # malformed expression simply highlights nothing.
+        query = MailQuery.from_args(request.args)
+        mails = store.thread_for(request.args.get("id", ""))
+        return jsonify({
+            "mails": [to_view_model(m, query.main, query.optional) for m in mails],
+        })
+
     @bp.get("/attachments/<mail_id>/<int:index>")
     def download_attachment(mail_id, index):
         # Validate against the cache first: gives a clean 404 for unknown

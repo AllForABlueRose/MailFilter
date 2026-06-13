@@ -193,6 +193,21 @@ class MailStore:
         with self._lock:
             return list(self._mails)
 
+    def thread_for(self, mail_id):
+        """All mails sharing ``mail_id``'s conversation, earliest received first.
+
+        Ignores the current search filters — the thread view shows the whole
+        conversation. Returns ``[]`` if the id is unknown.
+        """
+        with self._lock:
+            target = next((m for m in self._mails if m["id"] == mail_id), None)
+            if target is None:
+                return []
+            cid = target["conversation_id"]
+            members = [m for m in self._mails if m["conversation_id"] == cid]
+        members.sort(key=lambda m: m["_received_dt"])
+        return members
+
     def known_ids(self):
         with self._lock:
             return {m["id"] for m in self._mails}
