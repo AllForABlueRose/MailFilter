@@ -65,6 +65,15 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(len(data["mails"]), 1)
         self.assertEqual(data["mails"][0]["subject"], "server error")
 
+    def test_api_mail_valid_query_has_empty_error(self):
+        data = self.client.get("/api/mail?main=server").get_json()
+        self.assertEqual(data["query_error"], "")
+
+    def test_api_mail_reports_malformed_query(self):
+        data = self.client.get("/api/mail?main=a;").get_json()  # trailing operator
+        self.assertEqual(data["mails"], [])
+        self.assertTrue(data["query_error"])
+
     def test_refresh_starts_a_fetch(self):
         # Patch the actual fetch so the spawned thread does no real work.
         with mock.patch("mailfilter.outlook.refresh") as fake:

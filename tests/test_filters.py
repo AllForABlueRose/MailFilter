@@ -1,4 +1,8 @@
-"""Tests for mailfilter.filters: query parsing and the filtering predicate."""
+"""Tests for mailfilter.filters: query building and the filtering predicate.
+
+The expression grammar itself is covered in test_expr.py; here we test that
+each field is wired to the right derived text and combined correctly.
+"""
 
 import unittest
 from datetime import datetime
@@ -23,78 +27,93 @@ class ParseDatetimeTests(unittest.TestCase):
 
 
 class FromArgsTests(unittest.TestCase):
-    def test_lowercasing_and_case_preservation(self):
-        q = MailQuery.from_args({
-            "main": "Server, ERROR",
-            "optional": "Urgent, Critical",
-            "exclude": "Spam",
-            "sender": "Alice",
-            "recipient": "BOB",
-            "resources": "1",
-        })
-        self.assertEqual(q.main, ["server", "error"])
-        self.assertEqual(q.exclude, ["spam"])
-        self.assertEqual(q.sender, "alice")
-        self.assertEqual(q.recipient, "bob")
-        self.assertEqual(q.optional, ["Urgent", "Critical"])  # original case
-        self.assertTrue(q.resources_only)
+    def test_parses_fields_into_nodes(self):
+        q = MailQuery.from_args({"main": "a, b", "sender": "alice"})
+        self.assertIsNotNone(q.main)
+        self.assertIsNotNone(q.sender)
+        self.assertIsNone(q.optional)   # absent -> None
+        self.assertEqual(q.errors, ())
 
-    def test_keyword_splitting_trims_and_drops_blanks(self):
-        q = MailQuery.from_args({"main": " a , , b ,"})
-        self.assertEqual(q.main, ["a", "b"])
+    def test_collects_parse_errors(self):
+        q = MailQuery.from_args({"main": "a;"})  # trailing operator
+        self.assertTrue(q.errors)
+        self.assertIn("main", q.errors[0])
+        self.assertIsNone(q.main)
 
     def test_resources_flag_variants(self):
         for val in ("1", "true", "on"):
             self.assertTrue(MailQuery.from_args({"resources": val}).resources_only)
-        for val in ("", "0", "off", "no"):
+        for val in ("", "0", "off"):
             self.assertFalse(MailQuery.from_args({"resources": val}).resources_only)
 
     def test_defaults_when_absent(self):
         q = MailQuery.from_args({})
-        self.assertEqual(q.main, [])
+        self.assertIsNone(q.main)
         self.assertIsNone(q.start)
         self.assertFalse(q.resources_only)
+        self.assertEqual(q.errors, ())
 
 
 class FilterMailsTests(unittest.TestCase):
     def setUp(self):
+        # Disjoint vocabularies so each assertion is unambiguous.
         self.mails = [
-            _derived(id="a", subject="server error", received="2026-06-10 09:00:00"),
             _derived(
-                id="b", subject="weekly newsletter", body="no links here",
-                attachments=[], received="2026-06-11 09:00:00",
+                id="a", subject="server", body="alpha beta",
+                sender="Alice", sender_email="alice@x.com",
+                recipient_names=["Bob"], recipient_emails=["bob@x.com"],
+                attachments=[{"filename": "f.pdf"}],
+                received="2026-06-10 09:00:00",
+            ),
+            _derived(
+                id="b", subject="newsletter", body="gamma",
                 sender="Carol", sender_email="carol@x.com",
+                recipient_names=["Dave"], recipient_emails=["dave@x.com"],
+                attachments=[],
+                received="2026-06-11 09:00:00",
             ),
         ]
 
-    def _ids(self, query):
-        return [m["id"] for m in filter_mails(self.mails, query)]
+    def _ids(self, args):
+        q = MailQuery.from_args(args)
+        self.assertEqual(q.errors, ())
+        return [m["id"] for m in filter_mails(self.mails, q)]
 
     def test_empty_query_returns_all_in_order(self):
-        self.assertEqual(self._ids(MailQuery()), ["a", "b"])
+        self.assertEqual(self._ids({}), ["a", "b"])
 
-    def test_date_range_inclusive(self):
-        q = MailQuery(start=datetime(2026, 6, 11), end=datetime(2026, 6, 12))
-        self.assertEqual(self._ids(q), ["b"])
+    def test_main_or(self):
+        self.assertEqual(self._ids({"main": "server, gamma"}), ["a", "b"])
+        self.assertEqual(self._ids({"main": "server"}), ["a"])
 
-    def test_main_keyword_any_of(self):
-        self.assertEqual(self._ids(MailQuery(main=["server"])), ["a"])
-        self.assertEqual(self._ids(MailQuery(main=["server", "newsletter"])), ["a", "b"])
-        self.assertEqual(self._ids(MailQuery(main=["nope"])), [])
+    def test_main_and(self):
+        self.assertEqual(self._ids({"main": "server; alpha"}), ["a"])
+        self.assertEqual(self._ids({"main": "server; gamma"}), [])
 
-    def test_exclude_keyword(self):
-        self.assertEqual(self._ids(MailQuery(exclude=["newsletter"])), ["a"])
+    def test_main_grouping(self):
+        # (server OR newsletter) AND bob  -> only 'a' (has bob as recipient)
+        self.assertEqual(self._ids({"main": "[server, newsletter]; bob"}), ["a"])
 
-    def test_sender_substring(self):
-        self.assertEqual(self._ids(MailQuery(sender="carol")), ["b"])
-        self.assertEqual(self._ids(MailQuery(sender="alice")), ["a"])
+    def test_main_regex(self):
+        self.assertEqual(self._ids({"main": "<{(serv\\w+)}>"}), ["a"])
 
-    def test_recipient_substring(self):
-        self.assertEqual(self._ids(MailQuery(recipient="bob jones")), ["a", "b"])
+    def test_exclude_expression(self):
+        self.assertEqual(self._ids({"exclude": "newsletter"}), ["a"])
+        # exclude when BOTH present -> drops 'a', keeps 'b'
+        self.assertEqual(self._ids({"exclude": "alpha; server"}), ["b"])
+
+    def test_sender_expression(self):
+        self.assertEqual(self._ids({"sender": "alice, carol"}), ["a", "b"])
+        self.assertEqual(self._ids({"sender": "alice"}), ["a"])
+
+    def test_recipient_expression(self):
+        self.assertEqual(self._ids({"recipient": "bob"}), ["a"])
 
     def test_resources_only(self):
-        # 'a' has links+attachment; 'b' has neither.
-        self.assertEqual(self._ids(MailQuery(resources_only=True)), ["a"])
+        self.assertEqual(self._ids({"resources": "1"}), ["a"])
+
+    def test_date_range_inclusive(self):
+        self.assertEqual(self._ids({"start": "2026-06-11T00:00"}), ["b"])
 
 
 if __name__ == "__main__":

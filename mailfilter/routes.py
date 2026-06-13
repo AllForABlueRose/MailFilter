@@ -50,10 +50,16 @@ def create_blueprint(store, settings):
     @bp.get("/api/mail")
     def api_mail():
         query = MailQuery.from_args(request.args)
+        status = store.status_snapshot()
+        if query.errors:
+            # A malformed expression: show nothing and report why, rather than
+            # filter on a half-understood query.
+            return jsonify({"mails": [], "query_error": " | ".join(query.errors), **status})
         mails = filter_mails(store.snapshot(), query)
         return jsonify({
-            "mails": [to_view_model(m, query.optional) for m in mails],
-            **store.status_snapshot(),
+            "mails": [to_view_model(m, query.main, query.optional) for m in mails],
+            "query_error": "",
+            **status,
         })
 
     @bp.get("/attachments/<mail_id>/<int:index>")

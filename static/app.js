@@ -87,6 +87,9 @@ async function loadMail(){
     if(data.fetch_error){
         status += " | " + data.fetch_error;
     }
+    if(data.query_error){
+        status += " | ⚠ " + data.query_error;
+    }
     document.getElementById('fetchStatus').innerText = status;
 
     const container = document.getElementById('mailContainer');

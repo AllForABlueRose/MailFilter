@@ -1,13 +1,20 @@
 """Pure mail filtering — no Flask, no HTML, no COM.
 
-Operates on the derived "_" fields the MailStore computes at ingest
-time, so a request does no datetime parsing or string lowering per mail.
+Each text field (main, optional, exclude, sender, recipient) is a boolean
+keyword expression parsed by :mod:`mailfilter.expr` (`,` = OR, `;` = AND,
+`[ ]` = grouping, `<{( regex )}>`). Matching runs against the derived "_"
+fields the MailStore computes at ingest, so a request does no datetime parsing
+or string lowering per mail. ``optional`` is parsed only for highlighting; it
+does not filter.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
+
+from . import expr
+from .expr import ExprError
 
 
 def parse_datetime(value):
@@ -20,33 +27,45 @@ def parse_datetime(value):
         return None
 
 
-def _split_keywords(raw):
-    return [part.strip() for part in (raw or "").split(",") if part.strip()]
-
-
 @dataclass(frozen=True)
 class MailQuery:
     start: datetime | None = None
     end: datetime | None = None
-    main: list = field(default_factory=list)        # lowercased
-    optional: list = field(default_factory=list)    # original case (highlighting only)
-    exclude: list = field(default_factory=list)     # lowercased
-    sender: str = ""                                # lowercased
-    recipient: str = ""                             # lowercased
-    resources_only: bool = False                    # attachments and/or links
+    main: object = None          # parsed expr node, or None when blank
+    optional: object = None      # parsed for highlighting only (does not filter)
+    exclude: object = None
+    sender: object = None
+    recipient: object = None
+    resources_only: bool = False  # attachments and/or links
+    errors: tuple = ()            # human-readable expression parse errors
 
     @classmethod
     def from_args(cls, args):
-        """Build a query from request query-string args."""
+        """Build a query from request query-string args.
+
+        Expression fields that fail to parse are recorded in ``errors`` (and
+        left as ``None``); the caller should surface ``errors`` and return no
+        results rather than filter on a half-understood query.
+        """
+        errors = []
+
+        def parse_field(name):
+            try:
+                return expr.parse(args.get(name))
+            except ExprError as e:
+                errors.append(f"{name}: {e}")
+                return None
+
         return cls(
             start=parse_datetime(args.get("start")),
             end=parse_datetime(args.get("end")),
-            main=[k.lower() for k in _split_keywords(args.get("main"))],
-            optional=_split_keywords(args.get("optional")),
-            exclude=[k.lower() for k in _split_keywords(args.get("exclude"))],
-            sender=args.get("sender", "").strip().lower(),
-            recipient=args.get("recipient", "").strip().lower(),
+            main=parse_field("main"),
+            optional=parse_field("optional"),
+            exclude=parse_field("exclude"),
+            sender=parse_field("sender"),
+            recipient=parse_field("recipient"),
             resources_only=args.get("resources") in ("1", "true", "on"),
+            errors=tuple(errors),
         )
 
 
@@ -59,14 +78,13 @@ def filter_mails(mails, query):
             continue
         if query.end is not None and received > query.end:
             continue
-        text = mail["_search_text"]
-        if query.main and not any(keyword in text for keyword in query.main):
+        if query.main is not None and not expr.evaluate(query.main, mail["_search_text"]):
             continue
-        if query.exclude and any(keyword in text for keyword in query.exclude):
+        if query.exclude is not None and expr.evaluate(query.exclude, mail["_search_text"]):
             continue
-        if query.sender and query.sender not in mail["_sender_text"]:
+        if query.sender is not None and not expr.evaluate(query.sender, mail["_sender_text"]):
             continue
-        if query.recipient and query.recipient not in mail["_recipient_text"]:
+        if query.recipient is not None and not expr.evaluate(query.recipient, mail["_recipient_text"]):
             continue
         if query.resources_only and not (
             mail["_has_attachments"] or mail["_has_links"]
