@@ -2,10 +2,11 @@
 
 Dependency direction:
     routes -> filters/presenter -> store
+    routes -> settings_store
     scheduler -> outlook -> store
-    store -> crypto            (cache protection at rest)
-Only outlook.py and crypto.py import pywin32 (both lazily); only store.py owns
-mutable state.
+    store, settings_store -> crypto    (cache protection at rest)
+Only outlook.py and crypto.py import pywin32 (both lazily); store.py and
+settings_store.py own mutable state.
 """
 
 from flask import Flask
@@ -15,6 +16,7 @@ import config
 from . import outlook
 from .routes import create_blueprint
 from .scheduler import RefreshScheduler
+from .settings_store import SettingsStore
 from .store import MailStore
 
 
@@ -28,7 +30,10 @@ def create_app():
     store = MailStore(config.CACHE_FILE)
     store.load()
 
-    app.register_blueprint(create_blueprint(store))
+    settings = SettingsStore(config.SETTINGS_FILE)
+    settings.load()
+
+    app.register_blueprint(create_blueprint(store, settings))
 
     # Exposed for the entry point and for tests.
     #   mail_initializer() — background Outlook bring-up + initial fetch.
@@ -36,6 +41,7 @@ def create_app():
     # Both are left for the entry point to start so importing the app
     # (e.g. in tests) never spawns threads or touches Outlook.
     app.extensions["mail_store"] = store
+    app.extensions["settings_store"] = settings
     app.extensions["mail_initializer"] = lambda: outlook.start_async(store)
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,

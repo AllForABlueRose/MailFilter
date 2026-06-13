@@ -20,12 +20,23 @@ from .presenter import to_view_model
 log = logging.getLogger(__name__)
 
 
-def create_blueprint(store):
+def create_blueprint(store, settings):
     bp = Blueprint("mailfilter", __name__)
 
     @bp.get("/")
     def index():
         return render_template("index.html")
+
+    @bp.get("/api/settings")
+    def get_settings():
+        return jsonify(settings.snapshot())
+
+    @bp.post("/api/settings")
+    def save_settings():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(settings.update(data))
 
     @bp.post("/refresh")
     def refresh_now():

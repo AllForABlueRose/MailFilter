@@ -26,7 +26,9 @@ class RouteTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
         self._orig_cache = config.CACHE_FILE
+        self._orig_settings = config.SETTINGS_FILE
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
+        config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -37,6 +39,7 @@ class RouteTests(unittest.TestCase):
 
     def tearDown(self):
         config.CACHE_FILE = self._orig_cache
+        config.SETTINGS_FILE = self._orig_settings
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -87,6 +90,32 @@ class RouteTests(unittest.TestCase):
     def test_attachment_download_unavailable_is_503(self):
         # Known (id, index) but Outlook can't be reached -> 503.
         self.assertEqual(self.client.get("/attachments/ID1/0").status_code, 503)
+
+    def test_get_settings_returns_defaults_initially(self):
+        data = self.client.get("/api/settings").get_json()
+        self.assertEqual(data["main"], "")
+        self.assertFalse(data["resources"])
+
+    def test_post_settings_persists_and_get_returns_them(self):
+        resp = self.client.post(
+            "/api/settings", json={"main": "server", "resources": True}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["main"], "server")
+        again = self.client.get("/api/settings").get_json()
+        self.assertEqual(again["main"], "server")
+        self.assertTrue(again["resources"])
+
+    def test_settings_survive_an_app_restart(self):
+        self.client.post("/api/settings", json={"sender": "alice@example.com"})
+        # A fresh app against the same (patched) SETTINGS_FILE reloads them.
+        restarted = create_app().test_client()
+        data = restarted.get("/api/settings").get_json()
+        self.assertEqual(data["sender"], "alice@example.com")
+
+    def test_post_settings_rejects_non_object(self):
+        resp = self.client.post("/api/settings", json=["not", "a", "dict"])
+        self.assertEqual(resp.status_code, 400)
 
 
 if __name__ == "__main__":

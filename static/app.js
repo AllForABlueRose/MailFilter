@@ -1,11 +1,65 @@
 let resourcesOnly = false;
 
-function toggleResources(){
-    resourcesOnly = !resourcesOnly;
+// Sidebar setting key -> input element id. `resources` is a boolean handled
+// separately via the toggle button.
+const SETTINGS_FIELDS = {
+    start: 'startDate',
+    end: 'endDate',
+    main: 'mainKeywords',
+    optional: 'optionalKeywords',
+    exclude: 'excludeKeywords',
+    sender: 'senderFilter',
+    recipient: 'recipientFilter',
+};
+
+function syncResourcesButton(){
     const btn = document.getElementById('resourcesToggle');
     btn.classList.toggle('active', resourcesOnly);
     btn.setAttribute('aria-pressed', String(resourcesOnly));
     btn.textContent = `📎 Attachments & Links: ${resourcesOnly ? 'On' : 'Off'}`;
+}
+
+function toggleResources(){
+    resourcesOnly = !resourcesOnly;
+    syncResourcesButton();
+    saveSettings();
+    loadMail();
+}
+
+function currentSettings(){
+    const settings = {resources: resourcesOnly};
+    for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
+        settings[key] = document.getElementById(id).value;
+    }
+    return settings;
+}
+
+// Persist the last-used search server-side so a relaunch restores it.
+function saveSettings(){
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(currentSettings()),
+    }).catch(() => {});
+}
+
+async function restoreSettings(){
+    try{
+        const response = await fetch('/api/settings');
+        const settings = await response.json();
+        for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
+            document.getElementById(id).value = settings[key] || '';
+        }
+        resourcesOnly = !!settings.resources;
+        syncResourcesButton();
+    }catch(e){
+        // No saved settings (or fetch failed) — start from blank defaults.
+    }
+}
+
+// A user-initiated search: persist the settings, then load.
+function applyFilters(){
+    saveSettings();
     loadMail();
 }
 
@@ -134,5 +188,10 @@ function fileIcon(filename){
     return FILE_ICONS[ext] || '📎';
 }
 
-loadMail();
-setInterval(loadMail, 30000);
+async function init(){
+    await restoreSettings();   // repopulate the sidebar from the saved search
+    loadMail();
+    setInterval(loadMail, 30000);
+}
+
+init();
