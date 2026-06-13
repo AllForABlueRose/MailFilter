@@ -1,15 +1,36 @@
 // The workspace tray: collect dragged mail, then bulk-download / open links.
 
-function toggleTray(){
+// The right panel hosts two modes that share the area: the workspace tray and
+// the regex compiler. The two top-bar buttons switch between them.
+let panelMode = null;   // 'workspace' | 'regex' | null (closed)
+
+function toggleTray(){ togglePanel('workspace'); }
+function toggleRegex(){ togglePanel('regex'); }
+
+function togglePanel(mode){
     const tray = document.getElementById('tray');
-    const willOpen = tray.hidden;
-    tray.hidden = !willOpen;
-    document.getElementById('trayToggle').classList.toggle('active', willOpen);
+    if(!tray.hidden && panelMode === mode){
+        tray.hidden = true;
+        panelMode = null;
+    }else{
+        tray.hidden = false;
+        panelMode = mode;
+    }
+    applyPanelMode();
+}
+
+function applyPanelMode(){
+    const open = !document.getElementById('tray').hidden;
+    document.getElementById('workspaceView').hidden = !(open && panelMode === 'workspace');
+    document.getElementById('regexView').hidden = !(open && panelMode === 'regex');
+    document.getElementById('trayToggle').classList.toggle('active', open && panelMode === 'workspace');
+    document.getElementById('regexToggle').classList.toggle('active', open && panelMode === 'regex');
 }
 
 function closeTray(){
     document.getElementById('tray').hidden = true;
-    document.getElementById('trayToggle').classList.remove('active');
+    panelMode = null;
+    applyPanelMode();
 }
 
 function addToTray(id){
@@ -69,8 +90,10 @@ function renderTray(){
 // Save every attachment of the collected mails into a dated folder on the
 // server (no browser "Save As" dialog) — one at a time, server-side.
 function downloadTrayAttachments(){
+    // Use each attachment's original index (blacklisted ones are already absent
+    // from the view model, so they're naturally skipped here).
     const items = [];
-    trayMails.forEach(m => (m.attachments || []).forEach((att, i) => items.push({id: m.id, index: i})));
+    trayMails.forEach(m => (m.attachments || []).forEach(att => items.push({id: m.id, index: att.index})));
     const status = document.getElementById('trayStatus');
     if(!items.length){ status.textContent = 'No attachments to download.'; return; }
     status.textContent = `Downloading ${items.length} attachment(s)...`;
@@ -98,8 +121,8 @@ function openTrayLinks(){
     const opened = [];
     trayMails.forEach(m => {
         let any = false;
-        (m.links || []).forEach(url => {
-            const w = window.open(url, '_blank');
+        (m.links || []).forEach(link => {
+            const w = window.open(link.url, '_blank');
             if(w){ w.opener = null; any = true; }
         });
         if(any){

@@ -24,6 +24,10 @@ DEFAULTS = {
     "exclude": "",
     "sender": "",
     "recipient": "",
+    "exclude_sender": "",
+    "exclude_recipient": "",
+    "attachment_blacklist": "",
+    "links_blacklist": "",
     "resources": False,
 }
 

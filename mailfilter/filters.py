@@ -36,6 +36,12 @@ class MailQuery:
     exclude: object = None
     sender: object = None
     recipient: object = None
+    exclude_sender: object = None
+    exclude_recipient: object = None
+    # Not filters: these drop matching attachments/links from each mail's view
+    # model (display + workspace bulk actions), without hiding the mail.
+    attachment_blacklist: object = None
+    links_blacklist: object = None
     resources_only: bool = False  # attachments and/or links
     errors: tuple = ()            # human-readable expression parse errors
 
@@ -64,6 +70,10 @@ class MailQuery:
             exclude=parse_field("exclude"),
             sender=parse_field("sender"),
             recipient=parse_field("recipient"),
+            exclude_sender=parse_field("exclude_sender"),
+            exclude_recipient=parse_field("exclude_recipient"),
+            attachment_blacklist=parse_field("attachment_blacklist"),
+            links_blacklist=parse_field("links_blacklist"),
             resources_only=args.get("resources") in ("1", "true", "on"),
             errors=tuple(errors),
         )
@@ -85,6 +95,10 @@ def filter_mails(mails, query):
         if query.sender is not None and not expr.evaluate(query.sender, mail["_sender_text"]):
             continue
         if query.recipient is not None and not expr.evaluate(query.recipient, mail["_recipient_text"]):
+            continue
+        if query.exclude_sender is not None and expr.evaluate(query.exclude_sender, mail["_sender_text"]):
+            continue
+        if query.exclude_recipient is not None and expr.evaluate(query.exclude_recipient, mail["_recipient_text"]):
             continue
         if query.resources_only and not (
             mail["_has_attachments"] or mail["_has_links"]

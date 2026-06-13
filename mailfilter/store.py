@@ -117,8 +117,10 @@ class MailStore:
         sender_text = " ".join(
             [mail.get("sender", ""), mail.get("sender_email", "")]
         ).lower()
+        # Recipient search/exclude covers everyone the mail went to — To and CC.
         recipient_text = " ".join(
             mail.get("recipient_names", []) + mail.get("recipient_emails", [])
+            + mail.get("cc_names", []) + mail.get("cc_emails", [])
         ).lower()
         mail["_received_dt"] = datetime.strptime(mail["received"], RECEIVED_FORMAT)
         mail["_sender_text"] = sender_text
@@ -129,12 +131,12 @@ class MailStore:
         mail["_links"] = extract_links(own_message_body(mail.get("body", "")))
         mail["_has_links"] = bool(mail["_links"])
         mail["_has_attachments"] = bool(mail.get("attachments"))
+        # Keyword search (main / exclude) is subject + body only — sender and
+        # recipient have their own dedicated fields (_sender_text/_recipient_text).
         mail["_search_text"] = "\n".join(
             [
                 mail.get("subject", "").lower(),
                 mail.get("body", "").lower(),
-                sender_text,
-                recipient_text,
             ]
         )
         return mail

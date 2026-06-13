@@ -24,6 +24,7 @@ body{
 .content-bar{
     display:flex;
     justify-content:flex-end;
+    gap:8px;
     padding:12px 20px 0;
 }
 .content-split{
@@ -89,6 +90,43 @@ body{
     flex:1;
     overflow:auto;
     padding:16px;
+}
+/* The two panel modes each fill the tray. */
+#workspaceView, #regexView{
+    flex:1;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+}
+#workspaceView[hidden], #regexView[hidden]{
+    display:none;
+}
+.regex-input{
+    flex:1;                /* fills the top ~80% */
+    min-height:0;
+    margin:0;
+    padding:12px 16px;
+    border:none;
+    border-bottom:1px solid #e5e7eb;
+    resize:none;
+    box-sizing:border-box;
+    font-family:monospace;
+    font-size:13px;
+}
+.regex-output{
+    flex:0 0 20%;          /* bottom 20% of the panel */
+    margin:0;
+    padding:12px 16px;
+    border:none;
+    resize:none;
+    box-sizing:border-box;
+    background:#f9fafb;
+    color:#374151;
+    font-family:monospace;
+    font-size:13px;
+}
+.regex-input.drop-target{
+    background:#eff6ff;
 }
 .tray-empty{
     color:#9ca3af;
@@ -193,6 +231,48 @@ h3{
 .meta{
     color:#6b7280;
     margin-bottom:10px;
+}
+.meta-line{
+    font-size:13px;
+}
+.meta-label{
+    color:#9ca3af;
+}
+.meta-date{
+    margin-top:2px;
+}
+/* A person chip: name (draggable), email revealed and draggable on hover. */
+.p-name{
+    cursor:grab;
+}
+.p-name:hover{
+    text-decoration:underline;
+}
+.p-email{
+    display:none;
+    color:#9ca3af;
+    cursor:grab;
+}
+.person:hover .p-email{
+    display:inline;
+}
+/* Collapsed exclude sender/recipient fields and their toggle buttons. */
+.exclude-toggle{
+    display:block;       /* own row, so it never shares a line with the next label */
+    width:fit-content;   /* but stays compact, not full width */
+    margin:0 0 12px;
+    padding:2px 8px;
+    font-size:12px;
+    font-weight:normal;
+    background:#f3f4f6;
+    color:#6b7280;
+}
+.exclude-field[hidden]{
+    display:none;
+}
+.person-drop.drop-target{
+    outline:2px solid #2563eb;
+    outline-offset:1px;
 }
 .search-row{
     display:flex;
@@ -348,6 +428,10 @@ h3{
 }
 .flip-btn:hover{
     background:#d1d5db;
+}
+.flip-btn:disabled{
+    opacity:0.45;
+    cursor:not-allowed;
 }
 .modal-body{
     overflow:auto;

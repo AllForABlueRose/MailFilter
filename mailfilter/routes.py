@@ -28,7 +28,8 @@ def create_blueprint(store, settings, tag_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
-        view = to_view_model(mail, query.main, query.optional)
+        view = to_view_model(mail, query.main, query.optional,
+                             query.attachment_blacklist, query.links_blacklist)
         view["tags"] = tag_store.tags_for(mail["id"])
         return view
 

@@ -72,6 +72,24 @@ class RouteTests(unittest.TestCase):
         data = self.client.get("/api/mail?main=server").get_json()
         self.assertEqual(data["query_error"], "")
 
+    def test_api_mail_exclude_sender(self):
+        # Both seeded mails are from "Alice Smith" (make_mail default).
+        self.assertEqual(self.client.get("/api/mail?exclude_sender=alice").get_json()["mails"], [])
+
+    def test_view_models_include_people(self):
+        vm = self.client.get("/api/mail").get_json()["mails"][0]
+        self.assertIn("name", vm["sender"])
+        self.assertIsInstance(vm["recipients"], list)
+        self.assertIn("cc", vm)
+
+    def test_attachment_blacklist_omits_in_api(self):
+        self.store.add_mails([
+            make_mail(id="BL", attachments=[{"filename": "virus.exe"}, {"filename": "doc.pdf"}]),
+        ])
+        data = self.client.get("/api/mail?attachment_blacklist=.exe").get_json()
+        vm = next(m for m in data["mails"] if m["id"] == "BL")
+        self.assertEqual([a["filename"] for a in vm["attachments"]], ["doc.pdf"])
+
     def test_api_mail_reports_malformed_query(self):
         data = self.client.get("/api/mail?main=a;").get_json()  # trailing operator
         self.assertEqual(data["mails"], [])

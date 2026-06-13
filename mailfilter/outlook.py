@@ -188,18 +188,33 @@ def _parse_item(item, entry_id, received):
     except Exception:
         pass
 
-    recipient_names = []
-    recipient_emails = []
+    # Split recipients by type (olTo=1, olCC=2, olBCC=3). BCC is not exposed on
+    # received mail, so it never appears here. Names and addresses are appended
+    # together (with "" for a missing one) so the two lists stay index-aligned.
+    recipient_names, recipient_emails = [], []
+    cc_names, cc_emails = [], []
     try:
         for recipient in item.Recipients:
             try:
-                recipient_names.append(str(recipient.Name))
+                rtype = int(recipient.Type)
             except Exception:
-                pass
+                rtype = 1  # treat as "To" if the type can't be read
             try:
-                recipient_emails.append(str(recipient.Address))
+                name = str(recipient.Name)
             except Exception:
-                pass
+                name = ""
+            try:
+                addr = str(recipient.Address)
+            except Exception:
+                addr = ""
+            if rtype == 2:  # olCC
+                cc_names.append(name)
+                cc_emails.append(addr)
+            elif rtype == 3:  # olBCC — skip (not present on received mail anyway)
+                continue
+            else:  # olTo or unknown
+                recipient_names.append(name)
+                recipient_emails.append(addr)
     except Exception:
         pass
 
@@ -210,6 +225,8 @@ def _parse_item(item, entry_id, received):
         "sender_email": sender_email,
         "recipient_names": recipient_names,
         "recipient_emails": recipient_emails,
+        "cc_names": cc_names,
+        "cc_emails": cc_emails,
         "body": str(getattr(item, "Body", "")),
         "received": received.strftime(RECEIVED_FORMAT),
         "conversation_id": str(getattr(item, "ConversationID", entry_id)),

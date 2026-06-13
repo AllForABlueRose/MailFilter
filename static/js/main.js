@@ -31,7 +31,42 @@ async function init(){
     tray.addEventListener('drop', e => {
         e.preventDefault();
         tray.classList.remove('drag-over');
-        addToTray(e.dataTransfer.getData('text/plain'));
+        addToTray(e.dataTransfer.getData('text/x-mailfilter-mailid'));
+    });
+
+    // The regex compiler accepts dragged segments (people, links, filenames,
+    // plain text), each appended as its own line.
+    const regexBox = document.getElementById('regexSegments');
+    regexBox.addEventListener('dragover', e => { e.preventDefault(); regexBox.classList.add('drop-target'); });
+    regexBox.addEventListener('dragleave', () => regexBox.classList.remove('drop-target'));
+    regexBox.addEventListener('drop', e => {
+        e.preventDefault();
+        regexBox.classList.remove('drop-target');
+        addRegexSegment(
+            e.dataTransfer.getData('text/x-mailfilter-segment')
+            || e.dataTransfer.getData('text/x-mailfilter-person')
+            || e.dataTransfer.getData('text/uri-list')
+            || e.dataTransfer.getData('text/plain')
+        );
+    });
+
+    // Person fields accept a dragged name/email, appended with ", ".
+    document.querySelectorAll('.person-drop').forEach(input => {
+        input.addEventListener('dragover', e => {
+            if(e.dataTransfer.types.includes('text/x-mailfilter-person')){
+                e.preventDefault();
+                input.classList.add('drop-target');
+            }
+        });
+        input.addEventListener('dragleave', () => input.classList.remove('drop-target'));
+        input.addEventListener('drop', e => {
+            const value = e.dataTransfer.getData('text/x-mailfilter-person');
+            if(!value) return;
+            e.preventDefault();
+            input.classList.remove('drop-target');
+            const current = input.value.trim();
+            input.value = current ? current + ', ' + value : value;
+        });
     });
 
     await restoreSettings();   // repopulate the sidebar from the saved search

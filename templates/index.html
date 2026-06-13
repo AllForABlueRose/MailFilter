@@ -23,27 +23,45 @@
       <button class="icon-btn" type="button" onclick="applyFilters()" title="Search">🔍</button>
     </div>
     <div class="hint">, = or &nbsp; ; = and &nbsp; [ ] = group &nbsp; &lt;{(&nbsp;regex&nbsp;)}&gt;</div>
+    <button type="button" id="excludeKeywordsToggle" class="exclude-toggle"
+            onclick="toggleExclude('keywords')">+ Exclude keywords</button>
+    <input type="text" id="excludeKeywords" class="exclude-field" hidden
+           placeholder="spam, ads, newsletter" title="Hide mail matching these. Same operators.">
 
     <label>Optional Keywords</label>
     <input type="text" id="optionalKeywords" placeholder="urgent, critical"
            title="Highlight only. Same operators as Main Keywords.">
 
-    <label>Exclude Keywords</label>
-    <input type="text" id="excludeKeywords" placeholder="spam, ads, newsletter"
-           title="Same operators as Main Keywords.">
-
     <label>Sender</label>
-    <input type="text" id="senderFilter" placeholder="alice, bob"
-           title="Same operators as Main Keywords.">
+    <input type="text" id="senderFilter" class="person-drop" placeholder="alice, bob"
+           title="Same operators as Main Keywords. Drag a name/email here.">
+    <button type="button" id="excludeSenderToggle" class="exclude-toggle"
+            onclick="toggleExclude('sender')">+ Exclude sender</button>
+    <input type="text" id="excludeSenderFilter" class="person-drop exclude-field" hidden
+           placeholder="exclude sender…" title="Hide mail FROM these. Same operators.">
 
     <label>Recipient</label>
-    <input type="text" id="recipientFilter" placeholder="name or email"
-           title="Same operators as Main Keywords.">
+    <input type="text" id="recipientFilter" class="person-drop" placeholder="name or email"
+           title="Same operators as Main Keywords. Drag a name/email here.">
+    <button type="button" id="excludeRecipientToggle" class="exclude-toggle"
+            onclick="toggleExclude('recipient')">+ Exclude recipient</button>
+    <input type="text" id="excludeRecipientFilter" class="person-drop exclude-field" hidden
+           placeholder="exclude recipient…" title="Hide mail TO these. Same operators.">
 
     <button type="button" id="resourcesToggle" class="toggle-btn"
             aria-pressed="false" onclick="toggleResources()">
       📎 Attachments &amp; Links: Off
     </button>
+    <button type="button" id="blacklistToggle" class="exclude-toggle"
+            onclick="toggleBlacklist()">+ Blacklist</button>
+    <div id="blacklistFields" hidden>
+      <label>Attachment blacklist</label>
+      <input type="text" id="attachmentBlacklist" placeholder="e.g. .exe, <{(invoice\d+)}>"
+             title="Don't show matching attachments (the mail still shows). Same operators.">
+      <label>Links blacklist</label>
+      <input type="text" id="linksBlacklist" placeholder="e.g. tracking, unsubscribe"
+             title="Don't show matching links (the mail still shows). Same operators.">
+    </div>
 
     <div class="status-group">
       <div class="status-box">
@@ -60,25 +78,45 @@
 
   <div class="content">
     <div class="content-bar">
+      <button id="regexToggle" class="tray-toggle" onclick="toggleRegex()"
+              title="Build a regex from dragged names, emails, links, or attachment filenames">🧬 Regex Compiler</button>
       <button id="trayToggle" class="tray-toggle" onclick="toggleTray()"
               title="Open a workspace you can drag mail into">🗂 Workspace</button>
     </div>
     <div class="content-split">
       <div id="mailContainer" class="mail-list"></div>
       <div id="tray" class="tray" hidden>
-        <div class="tray-header">
-          <h2 class="tray-title">Workspace <span id="trayCount">(0)</span></h2>
-          <div class="tray-actions">
-            <button class="flip-btn" onclick="downloadTrayAttachments()"
-                    title="Download every attachment of the items here">⬇</button>
-            <button class="flip-btn" onclick="openTrayLinks()"
-                    title="Open every link of the items here in new tabs">🔗</button>
-            <button class="flip-btn" onclick="clearTray()" title="Clear workspace">🧹</button>
+        <div id="workspaceView">
+          <div class="tray-header">
+            <h2 class="tray-title">Workspace <span id="trayCount">(0)</span></h2>
+            <div class="tray-actions">
+              <button class="flip-btn" onclick="downloadTrayAttachments()"
+                      title="Download every attachment of the items here">⬇</button>
+              <button class="flip-btn" onclick="openTrayLinks()"
+                      title="Open every link of the items here in new tabs">🔗</button>
+              <button class="flip-btn" onclick="clearTray()" title="Clear workspace">🧹</button>
+            </div>
+            <div id="trayStatus" class="tray-status"></div>
           </div>
-          <div id="trayStatus" class="tray-status"></div>
+          <div id="trayBody" class="tray-body">
+            <p class="tray-empty">Drag mail items here to collect them.</p>
+          </div>
         </div>
-        <div id="trayBody" class="tray-body">
-          <p class="tray-empty">Drag mail items here to collect them.</p>
+        <div id="regexView" hidden>
+          <div class="tray-header">
+            <h2 class="tray-title">Regex Compiler</h2>
+            <div class="tray-actions">
+              <button class="flip-btn" onclick="compileRegex()"
+                      title="Generate a regex matching every segment">🔨 Compile</button>
+              <button id="encaseBtn" class="flip-btn" onclick="toggleEncase()" disabled
+                      title="Wrap the regex in <{( … )}> for a search field">📦 Encase</button>
+              <button class="flip-btn" onclick="clearRegex()" title="Clear">🧹</button>
+            </div>
+          </div>
+          <textarea id="regexSegments" class="regex-input"
+                    placeholder="Drag names, emails, links, or attachment filenames here — or type one per line."></textarea>
+          <textarea id="regexOutput" class="regex-output" readonly
+                    placeholder="Generated regex appears here."></textarea>
         </div>
       </div>
     </div>
@@ -103,6 +141,7 @@
 <script src="{{ url_for('static', filename='js/search.js') }}"></script>
 <script src="{{ url_for('static', filename='js/thread.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
+<script src="{{ url_for('static', filename='js/regex.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

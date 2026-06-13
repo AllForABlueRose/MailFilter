@@ -16,18 +16,34 @@ def _terms(expression):
     return expr.operands(_node(expression))
 
 
-def _view(main=None, optional=None, **overrides):
+def _view(main=None, optional=None, attachment_blacklist=None, links_blacklist=None, **overrides):
     mail = MailStore._with_derived(make_mail(**overrides))
     mail["is_thread"] = mail.get("is_thread", False)
-    return to_view_model(mail, _node(main), _node(optional))
+    return to_view_model(mail, _node(main), _node(optional),
+                         _node(attachment_blacklist), _node(links_blacklist))
 
 
 class ToViewModelTests(unittest.TestCase):
-    def test_escapes_subject_sender_and_preview(self):
-        vm = _view(subject="<script>x</script>", sender="<b>A</b>", body="<img src=q>")
+    def test_escapes_subject_and_preview(self):
+        vm = _view(subject="<script>x</script>", body="<img src=q>")
         self.assertEqual(vm["subject"], "&lt;script&gt;x&lt;/script&gt;")
-        self.assertEqual(vm["sender"], "&lt;b&gt;A&lt;/b&gt;")
         self.assertIn("&lt;img", vm["preview"])
+
+    def test_people_are_structured_and_raw(self):
+        # People are inserted via the DOM as text, so they stay raw (unescaped).
+        vm = _view(sender="<b>A</b>", sender_email="a@x.com",
+                   recipient_names=["Bob"], recipient_emails=["bob@x.com"],
+                   cc_names=["Carol"], cc_emails=["carol@x.com"])
+        self.assertEqual(vm["sender"], {"name": "<b>A</b>", "email": "a@x.com"})
+        self.assertEqual(vm["recipients"], [{"name": "Bob", "email": "bob@x.com"}])
+        self.assertEqual(vm["cc"], [{"name": "Carol", "email": "carol@x.com"}])
+
+    def test_person_with_missing_name_keeps_email(self):
+        vm = _view(recipient_names=[""], recipient_emails=["noname@x.com"])
+        self.assertEqual(vm["recipients"], [{"name": "", "email": "noname@x.com"}])
+
+    def test_cc_empty_when_absent(self):
+        self.assertEqual(_view()["cc"], [])
 
     def test_newlines_become_br(self):
         self.assertIn("line1<br>line2", _view(body="line1\nline2")["preview"])
@@ -50,6 +66,28 @@ class ToViewModelTests(unittest.TestCase):
         vm = _view(main="alpha", optional="beta", body="alpha and beta")
         self.assertIn('<span class="highlight-main">alpha</span>', vm["preview"])
         self.assertIn('<span class="highlight">beta</span>', vm["preview"])
+
+    def test_attachment_filename_highlighted_raw_kept(self):
+        att = _view(main="report", attachments=[{"filename": "report.pdf"}])["attachments"][0]
+        self.assertEqual(att["filename"], "report.pdf")   # raw value preserved
+        self.assertIn('<span class="highlight-main">report</span>', att["filename_html"])
+
+    def test_link_url_highlighted_raw_kept(self):
+        link = _view(optional="example", body="see https://example.com/x")["links"][0]
+        self.assertEqual(link["url"], "https://example.com/x")   # raw value preserved
+        self.assertIn('<span class="highlight">example</span>', link["url_html"])
+
+    def test_attachment_blacklist_omits_and_keeps_original_index(self):
+        vm = _view(attachment_blacklist=".exe",
+                   attachments=[{"filename": "setup.exe"}, {"filename": "report.pdf"}])
+        self.assertEqual([a["filename"] for a in vm["attachments"]], ["report.pdf"])
+        # the surviving attachment keeps its ORIGINAL position (1)
+        self.assertEqual(vm["attachments"][0]["index"], 1)
+        self.assertTrue(vm["attachments"][0]["url"].endswith("/1"))
+
+    def test_links_blacklist_omits_matching(self):
+        vm = _view(links_blacklist="track", body="a https://track.me/x and https://good.com/y")
+        self.assertEqual([l["url"] for l in vm["links"]], ["https://good.com/y"])
 
 
 class HighlightTests(unittest.TestCase):

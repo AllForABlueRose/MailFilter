@@ -7,6 +7,8 @@ async function openThread(mailId){
             id: mailId,
             main: document.getElementById('mainKeywords').value,
             optional: document.getElementById('optionalKeywords').value,
+            attachment_blacklist: document.getElementById('attachmentBlacklist').value,
+            links_blacklist: document.getElementById('linksBlacklist').value,
         });
         const response = await fetch('/api/thread?' + params);
         const data = await response.json();

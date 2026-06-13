@@ -40,6 +40,12 @@ class FromArgsTests(unittest.TestCase):
         self.assertIn("main", q.errors[0])
         self.assertIsNone(q.main)
 
+    def test_parses_blacklist_fields(self):
+        q = MailQuery.from_args({"attachment_blacklist": ".exe", "links_blacklist": "track"})
+        self.assertIsNotNone(q.attachment_blacklist)
+        self.assertIsNotNone(q.links_blacklist)
+        self.assertEqual(q.errors, ())
+
     def test_resources_flag_variants(self):
         for val in ("1", "true", "on"):
             self.assertTrue(MailQuery.from_args({"resources": val}).resources_only)
@@ -91,8 +97,24 @@ class FilterMailsTests(unittest.TestCase):
         self.assertEqual(self._ids({"main": "server; gamma"}), [])
 
     def test_main_grouping(self):
-        # (server OR newsletter) AND bob  -> only 'a' (has bob as recipient)
-        self.assertEqual(self._ids({"main": "[server, newsletter]; bob"}), ["a"])
+        # (server OR newsletter) AND alpha  -> only 'a'
+        self.assertEqual(self._ids({"main": "[server, newsletter]; alpha"}), ["a"])
+
+    def test_main_ignores_sender_and_recipient(self):
+        # 'alice' is a's sender and 'bob' a's recipient — keyword search sees neither.
+        self.assertEqual(self._ids({"main": "alice"}), [])
+        self.assertEqual(self._ids({"main": "bob"}), [])
+
+    def test_exclude_ignores_sender_and_recipient(self):
+        self.assertEqual(self._ids({"exclude": "alice"}), ["a", "b"])
+        self.assertEqual(self._ids({"exclude": "bob"}), ["a", "b"])
+
+    def test_main_ignores_attachment_names(self):
+        # A keyword present only in an attachment name must not filter the mail.
+        m = _derived(id="z", subject="hi", body="plain text",
+                     attachments=[{"filename": "secret_report.pdf"}])
+        q = MailQuery.from_args({"main": "secret"})
+        self.assertEqual([x["id"] for x in filter_mails([m], q)], [])
 
     def test_main_regex(self):
         self.assertEqual(self._ids({"main": "<{(serv\\w+)}>"}), ["a"])
@@ -108,6 +130,17 @@ class FilterMailsTests(unittest.TestCase):
 
     def test_recipient_expression(self):
         self.assertEqual(self._ids({"recipient": "bob"}), ["a"])
+
+    def test_exclude_sender(self):
+        self.assertEqual(self._ids({"exclude_sender": "alice"}), ["b"])
+
+    def test_exclude_recipient(self):
+        self.assertEqual(self._ids({"exclude_recipient": "bob"}), ["b"])
+
+    def test_recipient_matches_cc(self):
+        m = _derived(id="c", cc_names=["Eve"], cc_emails=["eve@x.com"])
+        q = MailQuery.from_args({"recipient": "eve"})
+        self.assertEqual([x["id"] for x in filter_mails([m], q)], ["c"])
 
     def test_resources_only(self):
         self.assertEqual(self._ids({"resources": "1"}), ["a"])

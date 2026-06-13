@@ -9,39 +9,77 @@ from config import PREVIEW_CHARS
 from . import expr
 
 
-def to_view_model(mail, main_node, optional_node):
+def to_view_model(mail, main_node, optional_node,
+                  attachment_blacklist=None, links_blacklist=None):
+    main_terms = expr.operands(main_node)
+    optional_terms = expr.operands(optional_node)
     preview = html.escape(mail.get("body", "")[:PREVIEW_CHARS])
-    preview = _highlight(
-        preview, expr.operands(main_node), expr.operands(optional_node)
-    )
+    preview = _highlight(preview, main_terms, optional_terms)
     preview = preview.replace("\n", "<br>")
     return {
         "id": mail.get("id", ""),
         "subject": html.escape(mail.get("subject", "")),
-        "sender": html.escape(mail.get("sender", "")),
+        # People are raw {name, email}; the frontend inserts them via the DOM as
+        # text (never HTML), so they are not escaped here.
+        "sender": {"name": mail.get("sender", ""), "email": mail.get("sender_email", "")},
+        "recipients": _people(mail.get("recipient_names", []), mail.get("recipient_emails", [])),
+        "cc": _people(mail.get("cc_names", []), mail.get("cc_emails", [])),
         "received": mail["received"],
         "preview": preview,
         "is_thread": mail["is_thread"],
         "icon": "🧵" if mail["is_thread"] else "✉️",
-        "attachments": _attachments(mail),
-        "links": mail.get("_links", []),
+        # Filenames and URLs carry a highlighted (escaped + span-wrapped) variant
+        # for display, alongside the raw value used for download/href/drag.
+        # Blacklisted attachments/links are dropped here (display + workspace).
+        "attachments": _attachments(mail, main_terms, optional_terms, attachment_blacklist),
+        "links": _links(mail, main_terms, optional_terms, links_blacklist),
     }
 
 
-def _attachments(mail):
-    """Attachment filenames paired with their download URLs.
+def _people(names, emails):
+    """Pair name/email lists by index into ``[{name, email}, ...]``.
 
-    The URL is keyed by mail id + index, which the /attachments route maps
-    back to the stored file — so nothing from the body reaches the path.
+    Tolerates lists of unequal length (older cache entries), padding the short
+    one with "" and dropping entries that have neither a name nor an email.
+    """
+    people = []
+    for i in range(max(len(names), len(emails))):
+        name = names[i] if i < len(names) else ""
+        email = emails[i] if i < len(emails) else ""
+        if name or email:
+            people.append({"name": name, "email": email})
+    return people
+
+
+def _attachments(mail, main_terms, optional_terms, blacklist):
+    """Attachment filenames (raw + highlighted) paired with their download URLs.
+
+    The URL/``index`` are keyed by the *original* attachment position, so a
+    blacklisted attachment can be skipped without misaligning the rest.
     """
     mail_id = quote(str(mail.get("id", "")), safe="")
-    return [
-        {
-            "filename": att.get("filename", "attachment"),
+    out = []
+    for i, att in enumerate(mail.get("attachments", [])):
+        filename = att.get("filename", "attachment")
+        if blacklist is not None and expr.evaluate(blacklist, filename.lower()):
+            continue
+        out.append({
+            "filename": filename,
+            "filename_html": _highlight(html.escape(filename), main_terms, optional_terms),
+            "index": i,
             "url": f"/attachments/{mail_id}/{i}",
-        }
-        for i, att in enumerate(mail.get("attachments", []))
-    ]
+        })
+    return out
+
+
+def _links(mail, main_terms, optional_terms, blacklist):
+    """http(s) links as raw URL + a highlighted (escaped) variant for display."""
+    out = []
+    for url in mail.get("_links", []):
+        if blacklist is not None and expr.evaluate(blacklist, url.lower()):
+            continue
+        out.append({"url": url, "url_html": _highlight(html.escape(url), main_terms, optional_terms)})
+    return out
 
 
 def _highlight(escaped_text, main_terms, optional_terms):

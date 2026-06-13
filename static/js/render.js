@@ -5,12 +5,19 @@
 function createCard(mail){
     const card = document.createElement('div');
     card.className = `card ${mail.is_thread ? 'thread' : 'single'}`;
-    // subject/sender/preview are already HTML-escaped server-side.
-    card.innerHTML = `
-        <h3>${mail.icon} ${mail.subject}</h3>
-        <div class="meta">${mail.sender}<br>${mail.received}</div>
-        <div>${mail.preview}</div>
-    `;
+
+    // subject/preview are pre-escaped server-side (safe as HTML); people are
+    // raw and inserted via the DOM as text (see buildMeta).
+    const heading = document.createElement('h3');
+    heading.innerHTML = `${mail.icon} ${mail.subject}`;
+    card.appendChild(heading);
+
+    card.appendChild(buildMeta(mail));
+
+    const preview = document.createElement('div');
+    preview.innerHTML = mail.preview;
+    card.appendChild(preview);
+
     const resources = renderResources(mail);
     if(resources){
         card.appendChild(resources);
@@ -35,8 +42,78 @@ function makeTag(symbol, label, recency){
     return tag;
 }
 
-// Build the attachments/links block with the DOM API so filenames and URLs
-// (which originate from email content) are inserted as text, never as HTML.
+// The From / To / Cc / date block. People are draggable into the person search
+// fields; the date is plain text.
+function buildMeta(mail){
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    appendPeopleLine(meta, 'From', [mail.sender || {}]);
+    if(mail.recipients && mail.recipients.length){ appendPeopleLine(meta, 'To', mail.recipients); }
+    if(mail.cc && mail.cc.length){ appendPeopleLine(meta, 'Cc', mail.cc); }
+    const date = document.createElement('div');
+    date.className = 'meta-date';
+    date.textContent = mail.received;
+    meta.appendChild(date);
+    return meta;
+}
+
+function appendPeopleLine(meta, label, people){
+    const line = document.createElement('div');
+    line.className = 'meta-line';
+    const tag = document.createElement('span');
+    tag.className = 'meta-label';
+    tag.textContent = label + ': ';
+    line.appendChild(tag);
+    people.forEach((person, i) => {
+        if(i > 0){ line.appendChild(document.createTextNode(', ')); }
+        line.appendChild(renderPerson(person));
+    });
+    meta.appendChild(line);
+}
+
+// A person chip: the name (falling back to the email) is shown and draggable;
+// the email is revealed on hover and is separately draggable. Both insert their
+// value into a person search field when dropped there.
+function renderPerson(person){
+    const name = person.name || person.email || '(unknown)';
+    const wrap = document.createElement('span');
+    wrap.className = 'person';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'p-name';
+    nameEl.textContent = name;
+    nameEl.draggable = true;
+    nameEl.title = person.email || name;   // hover shows the email
+    nameEl.addEventListener('dragstart', e => personDragStart(e, name));
+    wrap.appendChild(nameEl);
+
+    if(person.email && person.email !== name){
+        const emailEl = document.createElement('span');
+        emailEl.className = 'p-email';
+        emailEl.textContent = ` <${person.email}>`;
+        emailEl.draggable = true;
+        emailEl.addEventListener('dragstart', e => personDragStart(e, person.email));
+        wrap.appendChild(emailEl);
+    }
+    return wrap;
+}
+
+function personDragStart(e, value){
+    e.stopPropagation();   // don't also start a card (workspace) drag
+    e.dataTransfer.setData('text/x-mailfilter-person', value);
+    e.dataTransfer.effectAllowed = 'copy';
+}
+
+// Links and attachment filenames are draggable into the regex compiler.
+function segmentDragStart(e, value){
+    e.stopPropagation();
+    e.dataTransfer.setData('text/x-mailfilter-segment', value);
+    e.dataTransfer.effectAllowed = 'copy';
+}
+
+// Build the attachments/links block. The displayed name/URL is the server's
+// pre-escaped + keyword-highlighted HTML; the raw value (used for the icon,
+// href, and drag) never reaches the DOM as HTML.
 function renderResources(mail){
     const attachments = mail.attachments || [];
     const links = mail.links || [];
@@ -54,13 +131,14 @@ function renderResources(mail){
             const a = document.createElement('a');
             a.href = att.url;
             a.className = 'resource-item';
-            // A file-type icon for clarity, then the filename as text (it comes
-            // from mail content, so it must never be inserted as HTML).
             const icon = document.createElement('span');
             icon.className = 'file-icon';
             icon.textContent = fileIcon(att.filename);
             a.appendChild(icon);
-            a.appendChild(document.createTextNode(att.filename));
+            const name = document.createElement('span');
+            name.innerHTML = att.filename_html;   // escaped + highlighted server-side
+            a.appendChild(name);
+            a.addEventListener('dragstart', e => segmentDragStart(e, att.filename));
             group.appendChild(a);
         });
         wrap.appendChild(group);
@@ -70,13 +148,14 @@ function renderResources(mail){
         const group = document.createElement('div');
         group.className = 'resource-group';
         group.appendChild(makeLabel(`🔗 Links (${links.length})`));
-        links.forEach(url => {
+        links.forEach(link => {
             const a = document.createElement('a');
-            a.href = url;
-            a.textContent = url;
+            a.href = link.url;
+            a.innerHTML = link.url_html;          // escaped + highlighted server-side
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
             a.className = 'resource-item';
+            a.addEventListener('dragstart', e => segmentDragStart(e, link.url));
             group.appendChild(a);
         });
         wrap.appendChild(group);
