@@ -20,7 +20,7 @@
     <div class="search-row">
       <input type="text" id="mainKeywords" placeholder="server; [502, 504]"
              title="Operators:  , = OR    ; = AND    [ ] = group    <{( regex )}>">
-      <button class="icon-btn" onclick="applyFilters()" title="Search">🔍</button>
+      <button class="icon-btn" type="button" onclick="applyFilters()" title="Search">🔍</button>
     </div>
     <div class="hint">, = or &nbsp; ; = and &nbsp; [ ] = group &nbsp; &lt;{(&nbsp;regex&nbsp;)}&gt;</div>
 
@@ -54,12 +54,34 @@
         <b>Status</b>
         <div id="fetchStatus">Unknown</div>
       </div>
-      <button class="icon-btn refresh-btn" onclick="refreshMail()" title="Refresh Mail">⟳</button>
+      <button class="icon-btn refresh-btn" type="button" onclick="refreshMail()" title="Refresh Mail">⟳</button>
     </div>
   </div>
 
   <div class="content">
-    <div id="mailContainer"></div>
+    <div class="content-bar">
+      <button id="trayToggle" class="tray-toggle" onclick="toggleTray()"
+              title="Open a workspace you can drag mail into">🗂 Workspace</button>
+    </div>
+    <div class="content-split">
+      <div id="mailContainer" class="mail-list"></div>
+      <div id="tray" class="tray" hidden>
+        <div class="tray-header">
+          <h2 class="tray-title">Workspace <span id="trayCount">(0)</span></h2>
+          <div class="tray-actions">
+            <button class="flip-btn" onclick="downloadTrayAttachments()"
+                    title="Download every attachment of the items here">⬇</button>
+            <button class="flip-btn" onclick="openTrayLinks()"
+                    title="Open every link of the items here in new tabs">🔗</button>
+            <button class="flip-btn" onclick="clearTray()" title="Clear workspace">🧹</button>
+          </div>
+          <div id="trayStatus" class="tray-status"></div>
+        </div>
+        <div id="trayBody" class="tray-body">
+          <p class="tray-empty">Drag mail items here to collect them.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -76,6 +98,11 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search.js') }}"></script>
+<script src="{{ url_for('static', filename='js/thread.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

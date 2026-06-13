@@ -10,9 +10,7 @@ derived once at ingest time so filtering does no per-request parsing.
 They are stripped again before the cache is written to disk.
 """
 
-import json
 import logging
-import os
 import re
 import threading
 from datetime import datetime
@@ -20,7 +18,7 @@ from pathlib import Path
 
 from config import RECEIVED_FORMAT
 
-from . import crypto
+from . import crypto, persistence
 
 log = logging.getLogger(__name__)
 
@@ -81,13 +79,8 @@ class MailStore:
     # ----- persistence -----
 
     def load(self):
-        if not self._cache_file.exists():
-            return
-        try:
-            payload, alg = crypto.decode(self._cache_file.read_bytes())
-            raw = json.loads(payload)
-        except Exception:
-            log.exception("Cache load failed")
+        raw, alg = persistence.load_encoded(self._cache_file)
+        if raw is None:
             return
         mails = []
         for entry in raw:
@@ -114,15 +107,7 @@ class MailStore:
 
     def _save(self):
         # Caller must hold the lock.
-        payload = json.dumps(
-            [_strip_derived(m) for m in self._mails],
-            ensure_ascii=False,
-            indent=2,
-        ).encode("utf-8")
-        temp_file = self._cache_file.with_suffix(".json.tmp")
-        with open(temp_file, "wb") as f:
-            f.write(crypto.encode(payload))
-        os.replace(temp_file, self._cache_file)
+        persistence.save_encoded(self._cache_file, [_strip_derived(m) for m in self._mails])
 
     # ----- derived fields -----
 

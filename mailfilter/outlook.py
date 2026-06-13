@@ -12,12 +12,13 @@ filename, and the bytes are pulled from Outlook on demand by
 
 import logging
 import os
-import re
 import tempfile
 import threading
 from datetime import datetime
 
 from config import OUTLOOK_INBOX_FOLDER, RECEIVED_FORMAT
+
+from . import util
 
 log = logging.getLogger(__name__)
 
@@ -216,16 +217,6 @@ def _parse_item(item, entry_id, received):
     }
 
 
-# Characters that are unsafe in a path component, collapsed to "_".
-_UNSAFE_NAME_RE = re.compile(r"[^\w.\-]+")
-
-
-def _safe_component(name, fallback):
-    """Sanitize a string into a single safe path component."""
-    cleaned = _UNSAFE_NAME_RE.sub("_", name).strip("_.")
-    return cleaned or fallback
-
-
 def _list_attachments(item):
     """Record each attachment's filename (no bytes saved — see fetch_attachment).
 
@@ -278,7 +269,7 @@ def fetch_attachment(entry_id, index):
         # then remove it so nothing is persisted to disk.
         tmp_dir = tempfile.mkdtemp(prefix="mailfilter_att_")
         tmp_path = os.path.join(
-            tmp_dir, _safe_component(filename, f"attachment_{index}")
+            tmp_dir, util.safe_filename(filename, f"attachment_{index}")
         )
         try:
             att.SaveAsFile(tmp_path)

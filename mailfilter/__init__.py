@@ -2,11 +2,11 @@
 
 Dependency direction:
     routes -> filters/presenter -> store
-    routes -> settings_store
+    routes -> settings_store, tag_store
     scheduler -> outlook -> store
-    store, settings_store -> crypto    (cache protection at rest)
-Only outlook.py and crypto.py import pywin32 (both lazily); store.py and
-settings_store.py own mutable state.
+    store, settings_store, tag_store -> crypto    (cache protection at rest)
+Only outlook.py and crypto.py import pywin32 (both lazily); store.py,
+settings_store.py and tag_store.py own mutable state.
 """
 
 from flask import Flask
@@ -18,6 +18,7 @@ from .routes import create_blueprint
 from .scheduler import RefreshScheduler
 from .settings_store import SettingsStore
 from .store import MailStore
+from .tag_store import TagStore
 
 
 def create_app():
@@ -33,7 +34,10 @@ def create_app():
     settings = SettingsStore(config.SETTINGS_FILE)
     settings.load()
 
-    app.register_blueprint(create_blueprint(store, settings))
+    tags = TagStore(config.TAGS_FILE)
+    tags.load()
+
+    app.register_blueprint(create_blueprint(store, settings, tags))
 
     # Exposed for the entry point and for tests.
     #   mail_initializer() — background Outlook bring-up + initial fetch.
@@ -42,6 +46,7 @@ def create_app():
     # (e.g. in tests) never spawns threads or touches Outlook.
     app.extensions["mail_store"] = store
     app.extensions["settings_store"] = settings
+    app.extensions["tag_store"] = tags
     app.extensions["mail_initializer"] = lambda: outlook.start_async(store)
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,

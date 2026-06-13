@@ -2,7 +2,9 @@
 
 import logging
 import threading
+from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 from flask import (
     Blueprint,
@@ -13,15 +15,22 @@ from flask import (
     send_file,
 )
 
-from . import outlook
+import config
+
+from . import outlook, util
 from .filters import MailQuery, filter_mails
 from .presenter import to_view_model
 
 log = logging.getLogger(__name__)
 
 
-def create_blueprint(store, settings):
+def create_blueprint(store, settings, tag_store):
     bp = Blueprint("mailfilter", __name__)
+
+    def view_model(mail, query):
+        view = to_view_model(mail, query.main, query.optional)
+        view["tags"] = tag_store.tags_for(mail["id"])
+        return view
 
     @bp.get("/")
     def index():
@@ -57,7 +66,7 @@ def create_blueprint(store, settings):
             return jsonify({"mails": [], "query_error": " | ".join(query.errors), **status})
         mails = filter_mails(store.snapshot(), query)
         return jsonify({
-            "mails": [to_view_model(m, query.main, query.optional) for m in mails],
+            "mails": [view_model(m, query) for m in mails],
             "query_error": "",
             **status,
         })
@@ -69,9 +78,7 @@ def create_blueprint(store, settings):
         # malformed expression simply highlights nothing.
         query = MailQuery.from_args(request.args)
         mails = store.thread_for(request.args.get("id", ""))
-        return jsonify({
-            "mails": [to_view_model(m, query.main, query.optional) for m in mails],
-        })
+        return jsonify({"mails": [view_model(m, query) for m in mails]})
 
     @bp.get("/attachments/<mail_id>/<int:index>")
     def download_attachment(mail_id, index):
@@ -95,7 +102,74 @@ def create_blueprint(store, settings):
             download_name=filename or att["filename"],
         )
 
+    @bp.post("/api/download")
+    def api_download():
+        """Save a batch of attachments to a dated folder on the server.
+
+        Body: ``{"items": [{"id": <mail id>, "index": <int>}, ...]}``. Files go
+        into ``<ATTACHMENTS_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a
+        time. Returns the folder and the saved filenames; per-item failures are
+        collected in ``errors`` rather than aborting the whole batch.
+        """
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        items = data.get("items") or []
+
+        folder = config.ATTACHMENTS_DIR / datetime.now().strftime("%Y-%m-%d")
+        folder.mkdir(parents=True, exist_ok=True)
+
+        saved, errors = [], []
+        for item in items:
+            mail_id = (item or {}).get("id")
+            index = (item or {}).get("index")
+            att = _find_attachment(store, mail_id, index) if isinstance(index, int) else None
+            if att is None:
+                errors.append(f"{mail_id}#{index}: unknown attachment")
+                continue
+            try:
+                filename, blob = outlook.fetch_attachment(mail_id, index)
+            except outlook.OutlookUnavailableError as e:
+                errors.append(str(e))
+                continue
+            except LookupError as e:
+                errors.append(f"{mail_id}#{index}: {e}")
+                continue
+            target = _unique_path(folder, filename or att["filename"], index)
+            target.write_bytes(blob)
+            saved.append({"id": mail_id, "index": index, "name": target.name})
+
+        for mid in {s["id"] for s in saved}:
+            tag_store.record(mid, "downloaded")
+
+        log.info("Saved %d attachment(s) to %s (%d error(s))", len(saved), folder, len(errors))
+        return jsonify({"folder": str(folder), "saved": saved, "errors": errors})
+
+    @bp.post("/api/tags")
+    def api_tags():
+        # Record a workspace action (e.g. links opened) performed client-side.
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        action = data.get("action")
+        for mail_id in data.get("ids") or []:
+            tag_store.record(mail_id, action)  # ignores unknown actions/ids
+        return jsonify({"status": "ok"})
+
     return bp
+
+
+def _unique_path(folder, filename, index):
+    """A non-colliding path inside ``folder`` for a sanitized ``filename``."""
+    safe = util.safe_filename(filename, f"attachment_{index}")
+    candidate = folder / safe
+    if not candidate.exists():
+        return candidate
+    stem, suffix = Path(safe).stem, Path(safe).suffix
+    n = 1
+    while (folder / f"{stem}_{n}{suffix}").exists():
+        n += 1
+    return folder / f"{stem}_{n}{suffix}"
 
 
 def _find_attachment(store, mail_id, index):

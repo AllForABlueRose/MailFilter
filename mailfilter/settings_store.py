@@ -6,13 +6,11 @@ guarded by an ``RLock``, written atomically and encoded at rest through the same
 at startup, so relaunching the app restores the previous search.
 """
 
-import json
 import logging
-import os
 import threading
 from pathlib import Path
 
-from . import crypto
+from . import persistence
 
 log = logging.getLogger(__name__)
 
@@ -41,14 +39,7 @@ class SettingsStore:
         self._settings = dict(DEFAULTS)
 
     def load(self):
-        if not self._cache_file.exists():
-            return
-        try:
-            payload, _alg = crypto.decode(self._cache_file.read_bytes())
-            raw = json.loads(payload)
-        except Exception:
-            log.exception("Settings load failed")
-            return
+        raw, _alg = persistence.load_encoded(self._cache_file)
         if isinstance(raw, dict):
             with self._lock:
                 # Start from DEFAULTS so any missing/legacy keys are filled in.
@@ -79,10 +70,4 @@ class SettingsStore:
 
     def _save(self):
         # Caller must hold the lock.
-        payload = json.dumps(
-            self._settings, ensure_ascii=False, indent=2
-        ).encode("utf-8")
-        temp_file = self._cache_file.with_suffix(".json.tmp")
-        with open(temp_file, "wb") as f:
-            f.write(crypto.encode(payload))
-        os.replace(temp_file, self._cache_file)
+        persistence.save_encoded(self._cache_file, self._settings)

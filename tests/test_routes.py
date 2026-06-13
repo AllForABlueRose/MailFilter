@@ -27,8 +27,10 @@ class RouteTests(unittest.TestCase):
         self._tmpdir = tempfile.mkdtemp()
         self._orig_cache = config.CACHE_FILE
         self._orig_settings = config.SETTINGS_FILE
+        self._orig_tags = config.TAGS_FILE
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
         config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
+        config.TAGS_FILE = Path(self._tmpdir) / "tags.json"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -40,6 +42,7 @@ class RouteTests(unittest.TestCase):
     def tearDown(self):
         config.CACHE_FILE = self._orig_cache
         config.SETTINGS_FILE = self._orig_settings
+        config.TAGS_FILE = self._orig_tags
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -98,6 +101,73 @@ class RouteTests(unittest.TestCase):
 
     def test_thread_unknown_id_is_empty(self):
         self.assertEqual(self.client.get("/api/thread?id=nope").get_json()["mails"], [])
+
+    def test_download_saves_attachments_to_dated_folder(self):
+        self.store.add_mails([
+            make_mail(id="D1", attachments=[{"filename": "a.pdf"}, {"filename": "b.pdf"}]),
+        ])
+        downloads = Path(self._tmpdir) / "downloads"
+        orig = config.ATTACHMENTS_DIR
+        config.ATTACHMENTS_DIR = downloads
+        try:
+            with mock.patch(
+                "mailfilter.outlook.fetch_attachment",
+                side_effect=lambda mid, idx: (f"file{idx}.pdf", b"bytes"),
+            ):
+                resp = self.client.post(
+                    "/api/download",
+                    json={"items": [{"id": "D1", "index": 0}, {"id": "D1", "index": 1}]},
+                )
+            data = resp.get_json()
+            self.assertEqual(len(data["saved"]), 2)
+            self.assertEqual(data["errors"], [])
+            # Each saved entry maps back to its mail (used for the UI tag).
+            self.assertEqual({s["id"] for s in data["saved"]}, {"D1"})
+            from datetime import datetime
+            folder = downloads / datetime.now().strftime("%Y-%m-%d")
+            self.assertTrue(folder.is_dir())
+            self.assertEqual(len(list(folder.iterdir())), 2)
+        finally:
+            config.ATTACHMENTS_DIR = orig
+
+    def test_download_reports_unknown_attachment(self):
+        downloads = Path(self._tmpdir) / "downloads2"
+        orig = config.ATTACHMENTS_DIR
+        config.ATTACHMENTS_DIR = downloads
+        try:
+            resp = self.client.post("/api/download", json={"items": [{"id": "nope", "index": 0}]})
+            data = resp.get_json()
+            self.assertEqual(data["saved"], [])
+            self.assertTrue(data["errors"])
+        finally:
+            config.ATTACHMENTS_DIR = orig
+
+    def test_mail_view_models_carry_tags(self):
+        mails = self.client.get("/api/mail").get_json()["mails"]
+        self.assertTrue(all("tags" in m for m in mails))
+        self.assertEqual(mails[0]["tags"], {})  # nothing recorded yet
+
+    def test_post_tags_records_links(self):
+        resp = self.client.post("/api/tags", json={"ids": ["ID1"], "action": "links"})
+        self.assertEqual(resp.status_code, 200)
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
+        self.assertEqual(vm["tags"].get("links"), "recent")
+
+    def test_post_tags_rejects_non_object(self):
+        self.assertEqual(self.client.post("/api/tags", json=["x"]).status_code, 400)
+
+    def test_download_records_downloaded_tag(self):
+        self.store.add_mails([make_mail(id="DT", attachments=[{"filename": "a.pdf"}])])
+        orig = config.ATTACHMENTS_DIR
+        config.ATTACHMENTS_DIR = Path(self._tmpdir) / "dl"
+        try:
+            with mock.patch("mailfilter.outlook.fetch_attachment",
+                            side_effect=lambda mid, idx: ("a.pdf", b"x")):
+                self.client.post("/api/download", json={"items": [{"id": "DT", "index": 0}]})
+            vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "DT")
+            self.assertEqual(vm["tags"].get("downloaded"), "recent")
+        finally:
+            config.ATTACHMENTS_DIR = orig
 
     def test_thread_highlights_with_active_search(self):
         self.store.add_mails([

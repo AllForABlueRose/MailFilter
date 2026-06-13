@@ -16,10 +16,134 @@ body{
 }
 .content{
     flex:1;
-    padding:20px;
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+    overflow:hidden;
+}
+.content-bar{
+    display:flex;
+    justify-content:flex-end;
+    padding:12px 20px 0;
+}
+.content-split{
+    flex:1;
+    display:flex;
+    gap:16px;
+    min-height:0;
+    padding:12px 0;
+}
+.mail-list{
+    flex:1;
+    min-width:0;
     overflow:auto;
+    padding:0 20px;
+}
+/* Workspace tray: opens to occupy the right half of the content area. */
+.tray{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    margin-right:20px;
+    background:white;
+    border:2px dashed #cbd5e1;
+    border-radius:12px;
+    overflow:hidden;
+}
+.tray[hidden]{
+    display:none;
+}
+.tray.drag-over{
+    border-color:#2563eb;
+    background:#eff6ff;
+}
+.tray-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    padding:12px 16px;
+    border-bottom:1px solid #e5e7eb;
+}
+.tray-title{
+    margin:0;
+    font-size:18px;
+}
+.tray-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+}
+.tray-status{
+    flex-basis:100%;
+    font-size:12px;
+    color:#6b7280;
+    word-break:break-all;
+}
+.tray-status:empty{
+    display:none;
+}
+.tray-body{
+    flex:1;
+    overflow:auto;
+    padding:16px;
+}
+.tray-empty{
+    color:#9ca3af;
+    text-align:center;
+    margin-top:24px;
+}
+.tray-toggle{
+    width:auto;
+    margin:0;
+    padding:10px 16px;
+    background:#e5e7eb;
+    color:#374151;
+    font-weight:bold;
+}
+.tray-toggle.active{
+    background:#2563eb;
+    color:white;
+}
+/* Top-right corner of a card: action tags, plus a remove button in the tray. */
+.card-corner{
+    position:absolute;
+    top:8px;
+    right:8px;
+    display:flex;
+    gap:6px;
+    align-items:center;
+}
+.card-tag{
+    font-size:15px;
+    line-height:1;
+    cursor:default;
+}
+/* Tags older than the recent window stay visible but desaturated. */
+.card-tag.old{
+    filter:grayscale(1);
+    opacity:0.5;
+}
+.tray-remove{
+    width:22px;
+    height:22px;
+    padding:0;
+    margin:0;
+    border:none;
+    border-radius:50%;
+    background:#e5e7eb;
+    color:#374151;
+    font-size:12px;
+    line-height:1;
+    cursor:pointer;
+}
+.tray-remove:hover{
+    background:#fca5a5;
 }
 .card{
+    position:relative;
     background:white;
     padding:16px;
     border-radius:12px;
@@ -61,6 +185,10 @@ input{
 }
 h3{
     margin-top:0;
+}
+.card h3{
+    /* leave room for the top-right corner (tags + tray remove button) */
+    padding-right:64px;
 }
 .meta{
     color:#6b7280;

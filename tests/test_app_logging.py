@@ -13,15 +13,16 @@ class PollingLogFilterTests(unittest.TestCase):
     def setUpClass(cls):
         # Point the stores at temp files before importing app (which builds the
         # app at import time), so the real caches are never read or written.
-        cls._orig = (config.CACHE_FILE, config.SETTINGS_FILE)
+        cls._orig = (config.CACHE_FILE, config.SETTINGS_FILE, config.TAGS_FILE)
         config.CACHE_FILE = Path(tempfile.mkdtemp()) / "cache.json"
         config.SETTINGS_FILE = Path(tempfile.mkdtemp()) / "settings.json"
+        config.TAGS_FILE = Path(tempfile.mkdtemp()) / "tags.json"
         import app
         cls.filt = app._MutePollingAccessLog()
 
     @classmethod
     def tearDownClass(cls):
-        config.CACHE_FILE, config.SETTINGS_FILE = cls._orig
+        config.CACHE_FILE, config.SETTINGS_FILE, config.TAGS_FILE = cls._orig
 
     def _record(self, requestline):
         # Mirrors werkzeug's access-log record shape.

@@ -9,9 +9,12 @@ CACHE_FILE = BASE_DIR / "mail_cache.json"
 # Last-used sidebar search settings (keywords, filters, toggles), persisted so a
 # relaunch restores the previous search. Encoded at rest like the mail cache.
 SETTINGS_FILE = BASE_DIR / "settings_cache.json"
-# Reserved for the upcoming targeted/bulk attachment download feature.
-# Single attachment downloads are streamed lazily from Outlook and never
-# persisted here (see outlook.fetch_attachment).
+# Per-mail workspace action tags (attachments downloaded / links opened) with
+# timestamps, so the tags persist across sessions and grey out after a week.
+TAGS_FILE = BASE_DIR / "tags_cache.json"
+# Workspace "download all attachments" saves into a dated subfolder here
+# (see routes.api_download). Single attachment downloads remain streamed lazily
+# from Outlook and are never persisted (see outlook.fetch_attachment).
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
