@@ -36,6 +36,29 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(store.tags_for("m1"), {"downloaded": "recent", "links": "recent"})
 
 
+class RemoveTests(unittest.TestCase):
+    def test_remove_clears_one_action(self):
+        store = _store()
+        store.record("m1", "marked")
+        store.record("m1", "downloaded")
+        store.remove("m1", "marked")
+        self.assertEqual(store.tags_for("m1"), {"downloaded": "recent"})
+
+    def test_remove_last_action_drops_mail(self):
+        store = _store()
+        store.record("m1", "marked")
+        store.remove("m1", "marked")
+        self.assertEqual(store.tags_for("m1"), {})
+        self.assertNotIn("m1", store._tags)
+
+    def test_remove_unknown_action_is_noop(self):
+        store = _store()
+        store.record("m1", "marked")
+        store.remove("m1", "bogus")
+        store.remove("m1", "downloaded")  # never recorded
+        self.assertEqual(store.tags_for("m1"), {"marked": "recent"})
+
+
 class RecencyTests(unittest.TestCase):
     def test_old_tag_is_reported_as_old(self):
         store = _store()
@@ -45,6 +68,12 @@ class RecencyTests(unittest.TestCase):
         result = store.tags_for("m1")
         self.assertEqual(result["downloaded"], "old")
         self.assertEqual(result["links"], "recent")
+
+    def test_marked_greys_after_recent_window(self):
+        store = _store()
+        old = (datetime.now() - timedelta(days=RECENT_DAYS + 1)).strftime(_TS)
+        store._tags = {"m1": {"marked": old}}
+        self.assertEqual(store.tags_for("m1"), {"marked": "old"})
 
 
 class PersistenceTests(unittest.TestCase):

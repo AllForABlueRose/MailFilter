@@ -34,6 +34,15 @@ async function init(){
         addToTray(e.dataTransfer.getData('text/x-mailfilter-mailid'));
     });
 
+    // "Collect matching mails": the wheel opens on hover and stays open while the
+    // pointer is over either the button or the wheel (both live in #collectWrap).
+    const collectWrap = document.getElementById('collectWrap');
+    collectWrap.addEventListener('mouseenter', openCollectWheel);
+    collectWrap.addEventListener('mouseleave', closeCollectWheel);
+    const collectWheel = document.getElementById('collectWheel');
+    collectWheel.addEventListener('wheel', cycleCollect, {passive: false});
+    collectWheel.addEventListener('click', collectFocused);
+
     // The regex compiler accepts dragged segments (people, links, filenames,
     // plain text), each appended as its own line.
     const regexBox = document.getElementById('regexSegments');
@@ -61,6 +70,35 @@ async function init(){
         input.addEventListener('dragleave', () => input.classList.remove('drop-target'));
         input.addEventListener('drop', e => {
             const value = e.dataTransfer.getData('text/x-mailfilter-person');
+            if(!value) return;
+            e.preventDefault();
+            input.classList.remove('drop-target');
+            const current = input.value.trim();
+            input.value = current ? current + ', ' + value : value;
+        });
+    });
+
+    // The compiled regex (or any plain text) can be dragged into a search field,
+    // appended with ", " (or input directly when the field is empty).
+    const regexOut = document.getElementById('regexOutput');
+    regexOut.addEventListener('dragstart', e => {
+        if(!regexOut.value) return;
+        e.dataTransfer.setData('text/x-mailfilter-regex', regexOut.value);
+        e.dataTransfer.setData('text/plain', regexOut.value);
+        e.dataTransfer.effectAllowed = 'copy';
+    });
+    document.querySelectorAll('.sidebar input[type="text"]').forEach(input => {
+        input.addEventListener('dragover', e => {
+            if(e.dataTransfer.types.includes('text/x-mailfilter-regex')
+               || e.dataTransfer.types.includes('text/plain')){
+                e.preventDefault();
+                input.classList.add('drop-target');
+            }
+        });
+        input.addEventListener('dragleave', () => input.classList.remove('drop-target'));
+        input.addEventListener('drop', e => {
+            const value = e.dataTransfer.getData('text/x-mailfilter-regex')
+                       || e.dataTransfer.getData('text/plain');
             if(!value) return;
             e.preventDefault();
             input.classList.remove('drop-target');

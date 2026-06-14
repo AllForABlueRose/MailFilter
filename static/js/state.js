@@ -7,6 +7,7 @@ let resourcesOnly = false;
 let mailById = {};          // id -> view model from the last load (drag source)
 let trayMails = [];         // mails collected in the workspace
 const trayIds = new Set();
+let traySortNewestFirst = true;   // workspace sort direction (toggled by the button)
 
 let threadMails = [];       // mails shown in the thread/message popup
 let threadOldestFirst = true;

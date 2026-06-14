@@ -1,5 +1,7 @@
 """HTTP layer: thin routes that delegate to store / filters / presenter."""
 
+import csv
+import io
 import logging
 import threading
 from datetime import datetime
@@ -108,7 +110,7 @@ def create_blueprint(store, settings, tag_store):
         """Save a batch of attachments to a dated folder on the server.
 
         Body: ``{"items": [{"id": <mail id>, "index": <int>}, ...]}``. Files go
-        into ``<ATTACHMENTS_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a
+        into ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a
         time. Returns the folder and the saved filenames; per-item failures are
         collected in ``errors`` rather than aborting the whole batch.
         """
@@ -117,7 +119,7 @@ def create_blueprint(store, settings, tag_store):
             abort(400, description="expected a JSON object")
         items = data.get("items") or []
 
-        folder = config.ATTACHMENTS_DIR / datetime.now().strftime("%Y-%m-%d")
+        folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
         folder.mkdir(parents=True, exist_ok=True)
 
         saved, errors = [], []
@@ -148,16 +150,81 @@ def create_blueprint(store, settings, tag_store):
 
     @bp.post("/api/tags")
     def api_tags():
-        # Record a workspace action (e.g. links opened) performed client-side.
+        # Record (or, with op="remove", clear) a workspace action performed
+        # client-side — e.g. links opened, or a mail marked/unmarked.
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
         action = data.get("action")
+        apply = tag_store.remove if data.get("op") == "remove" else tag_store.record
         for mail_id in data.get("ids") or []:
-            tag_store.record(mail_id, action)  # ignores unknown actions/ids
+            apply(mail_id, action)  # ignores unknown actions/ids
         return jsonify({"status": "ok"})
 
+    @bp.post("/api/report")
+    def api_report():
+        """Export a CSV report of the given mails into the dated workspace folder.
+
+        Body: ``{"ids": [<mail id>, ...]}`` in the order to write. Columns, left
+        to right: ``Datetime, subject, recipient, sender``. The filename embeds
+        the creation date. Unknown ids are skipped. Returns the folder, the file
+        name, and the row count.
+        """
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+
+        by_id = {m["id"]: m for m in store.snapshot()}
+        rows = []
+        for mail_id in data.get("ids") or []:
+            mail = by_id.get(mail_id)
+            if mail is None:
+                continue
+            rows.append([
+                mail.get("received", ""),
+                mail.get("subject", ""),
+                _people_text(mail.get("recipient_names", []), mail.get("recipient_emails", [])),
+                _person_text(mail.get("sender", ""), mail.get("sender_email", "")),
+            ])
+
+        now = datetime.now()
+        folder = config.WORKSPACE_DIR / now.strftime("%Y-%m-%d")
+        folder.mkdir(parents=True, exist_ok=True)
+        target = _unique_path(folder, f"report_{now.strftime('%Y-%m-%d')}.csv", 0)
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Datetime", "subject", "recipient", "sender"])
+        writer.writerows(rows)
+        # utf-8-sig so Excel opens the file with the right encoding.
+        target.write_text(buf.getvalue(), encoding="utf-8-sig", newline="")
+
+        log.info("Exported report of %d mail(s) to %s", len(rows), target)
+        return jsonify({"folder": str(folder), "name": target.name, "count": len(rows)})
+
     return bp
+
+
+def _person_text(name, email):
+    """Format one person as ``Name <email>`` (falling back to whichever exists)."""
+    name = (name or "").strip()
+    email = (email or "").strip()
+    if name and email:
+        return f"{name} <{email}>"
+    return name or email
+
+
+def _people_text(names, emails):
+    """Join paired name/email lists into ``Name <email>; ...`` for one CSV cell."""
+    people = []
+    for i in range(max(len(names), len(emails))):
+        text = _person_text(
+            names[i] if i < len(names) else "",
+            emails[i] if i < len(emails) else "",
+        )
+        if text:
+            people.append(text)
+    return "; ".join(people)
 
 
 def _unique_path(folder, filename, index):

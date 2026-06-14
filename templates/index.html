@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Mail Analyzer</title>
+<title>Mail Analyzer 2.0</title>
 <meta charset="utf-8">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <div class="container">
   <div class="sidebar">
-    <h2>Mail Analyzer</h2>
+    <h2>Mail Analyzer 2.0</h2>
 
     <label>From Date/Time</label>
     <input type="datetime-local" id="startDate">
@@ -18,11 +18,11 @@
 
     <label>Main Keywords</label>
     <div class="search-row">
-      <input type="text" id="mainKeywords" placeholder="server; [502, 504]"
-             title="Operators:  , = OR    ; = AND    [ ] = group    <{( regex )}>">
+      <input type="text" id="mainKeywords" placeholder="server; [[502, 504]]"
+             title="Operators:  , = OR    ; = AND    [[ ]] = group    <{( regex )}>">
       <button class="icon-btn" type="button" onclick="applyFilters()" title="Search">🔍</button>
     </div>
-    <div class="hint">, = or &nbsp; ; = and &nbsp; [ ] = group &nbsp; &lt;{(&nbsp;regex&nbsp;)}&gt;</div>
+    <div class="hint">, = or &nbsp; ; = and &nbsp; [[ ]] = group &nbsp; &lt;{(&nbsp;regex&nbsp;)}&gt;</div>
     <button type="button" id="excludeKeywordsToggle" class="exclude-toggle"
             onclick="toggleExclude('keywords')">+ Exclude keywords</button>
     <input type="text" id="excludeKeywords" class="exclude-field" hidden
@@ -90,10 +90,21 @@
           <div class="tray-header">
             <h2 class="tray-title">Workspace <span id="trayCount">(0)</span></h2>
             <div class="tray-actions">
-              <button class="flip-btn" onclick="downloadTrayAttachments()"
-                      title="Download every attachment of the items here">⬇</button>
-              <button class="flip-btn" onclick="openTrayLinks()"
-                      title="Open every link of the items here in new tabs">🔗</button>
+              <span id="collectWrap" class="collect-wrap">
+                <button id="trayCollectBtn" class="flip-btn" type="button"
+                        title="Hover to pick a label, then click to collect matching mails">𖣐</button>
+                <div id="collectWheel" class="collect-wheel" hidden></div>
+              </span>
+              <button id="trayMarkBtn" class="flip-btn" onclick="toggleTrayMark()"
+                      title="Mark every item here" disabled>🎯</button>
+              <button id="traySortBtn" class="flip-btn" onclick="toggleTraySort()"
+                      title="Sorted newest first — click for oldest first" disabled>▼</button>
+              <button id="trayDownloadBtn" class="flip-btn" onclick="downloadTrayAttachments()"
+                      title="Download every attachment of the items here" disabled>⬇</button>
+              <button id="trayLinksBtn" class="flip-btn" onclick="openTrayLinks()"
+                      title="Open every link of the items here in new tabs" disabled>🔗</button>
+              <button id="trayReportBtn" class="flip-btn" onclick="exportTrayReport()"
+                      title="Export a CSV report of the items here" disabled>📄</button>
               <button class="flip-btn" onclick="clearTray()" title="Clear workspace">🧹</button>
             </div>
             <div id="trayStatus" class="tray-status"></div>
@@ -115,7 +126,8 @@
           </div>
           <textarea id="regexSegments" class="regex-input"
                     placeholder="Drag names, emails, links, or attachment filenames here — or type one per line."></textarea>
-          <textarea id="regexOutput" class="regex-output" readonly
+          <textarea id="regexOutput" class="regex-output" readonly draggable="true"
+                    title="Drag this into a search field (or Encase it first)"
                     placeholder="Generated regex appears here."></textarea>
         </div>
       </div>

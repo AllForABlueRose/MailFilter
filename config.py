@@ -1,4 +1,4 @@
-"""Central configuration for the Mail Analyzer app."""
+"""Central configuration for the Mail Analyzer 2.0 app."""
 
 from pathlib import Path
 
@@ -12,10 +12,11 @@ SETTINGS_FILE = BASE_DIR / "settings_cache.json"
 # Per-mail workspace action tags (attachments downloaded / links opened) with
 # timestamps, so the tags persist across sessions and grey out after a week.
 TAGS_FILE = BASE_DIR / "tags_cache.json"
-# Workspace "download all attachments" saves into a dated subfolder here
-# (see routes.api_download). Single attachment downloads remain streamed lazily
-# from Outlook and are never persisted (see outlook.fetch_attachment).
-ATTACHMENTS_DIR = BASE_DIR / "attachments"
+# Workspace exports — "download all attachments" and "export report" — save into
+# a dated subfolder here (see routes.api_download / routes.api_report). Single
+# attachment downloads remain streamed lazily from Outlook and are never
+# persisted (see outlook.fetch_attachment).
+WORKSPACE_DIR = BASE_DIR / "workspace"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Outlook

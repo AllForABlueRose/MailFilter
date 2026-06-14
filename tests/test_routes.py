@@ -48,7 +48,7 @@ class RouteTests(unittest.TestCase):
     def test_index_renders(self):
         resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Mail Analyzer", resp.data)
+        self.assertIn(b"Mail Analyzer 2.0", resp.data)
 
     def test_api_mail_returns_mails_and_status(self):
         data = self.client.get("/api/mail").get_json()
@@ -125,8 +125,8 @@ class RouteTests(unittest.TestCase):
             make_mail(id="D1", attachments=[{"filename": "a.pdf"}, {"filename": "b.pdf"}]),
         ])
         downloads = Path(self._tmpdir) / "downloads"
-        orig = config.ATTACHMENTS_DIR
-        config.ATTACHMENTS_DIR = downloads
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = downloads
         try:
             with mock.patch(
                 "mailfilter.outlook.fetch_attachment",
@@ -146,19 +146,50 @@ class RouteTests(unittest.TestCase):
             self.assertTrue(folder.is_dir())
             self.assertEqual(len(list(folder.iterdir())), 2)
         finally:
-            config.ATTACHMENTS_DIR = orig
+            config.WORKSPACE_DIR = orig
+
+    def test_report_exports_csv_to_dated_folder(self):
+        import csv
+        from datetime import datetime
+        self.store.add_mails([
+            make_mail(id="R1", subject="alpha", received="2026-06-10 09:30:00",
+                      sender="Alice", sender_email="alice@x.com",
+                      recipient_names=["Bob"], recipient_emails=["bob@x.com"]),
+        ])
+        out = Path(self._tmpdir) / "wreport"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            resp = self.client.post("/api/report", json={"ids": ["R1", "nope"]})
+            data = resp.get_json()
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(data["count"], 1)  # unknown id skipped
+            folder = out / datetime.now().strftime("%Y-%m-%d")
+            saved = folder / data["name"]
+            self.assertTrue(saved.is_file())
+            self.assertIn(datetime.now().strftime("%Y-%m-%d"), data["name"])
+            with saved.open(encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.reader(f))
+            self.assertEqual(rows[0], ["Datetime", "subject", "recipient", "sender"])
+            self.assertEqual(rows[1], ["2026-06-10 09:30:00", "alpha",
+                                       "Bob <bob@x.com>", "Alice <alice@x.com>"])
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_report_rejects_non_object(self):
+        self.assertEqual(self.client.post("/api/report", json=["x"]).status_code, 400)
 
     def test_download_reports_unknown_attachment(self):
         downloads = Path(self._tmpdir) / "downloads2"
-        orig = config.ATTACHMENTS_DIR
-        config.ATTACHMENTS_DIR = downloads
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = downloads
         try:
             resp = self.client.post("/api/download", json={"items": [{"id": "nope", "index": 0}]})
             data = resp.get_json()
             self.assertEqual(data["saved"], [])
             self.assertTrue(data["errors"])
         finally:
-            config.ATTACHMENTS_DIR = orig
+            config.WORKSPACE_DIR = orig
 
     def test_mail_view_models_carry_tags(self):
         mails = self.client.get("/api/mail").get_json()["mails"]
@@ -174,10 +205,18 @@ class RouteTests(unittest.TestCase):
     def test_post_tags_rejects_non_object(self):
         self.assertEqual(self.client.post("/api/tags", json=["x"]).status_code, 400)
 
+    def test_post_tags_marks_and_unmarks(self):
+        self.client.post("/api/tags", json={"ids": ["ID1"], "action": "marked"})
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
+        self.assertEqual(vm["tags"].get("marked"), "recent")
+        self.client.post("/api/tags", json={"ids": ["ID1"], "action": "marked", "op": "remove"})
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
+        self.assertNotIn("marked", vm["tags"])
+
     def test_download_records_downloaded_tag(self):
         self.store.add_mails([make_mail(id="DT", attachments=[{"filename": "a.pdf"}])])
-        orig = config.ATTACHMENTS_DIR
-        config.ATTACHMENTS_DIR = Path(self._tmpdir) / "dl"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = Path(self._tmpdir) / "dl"
         try:
             with mock.patch("mailfilter.outlook.fetch_attachment",
                             side_effect=lambda mid, idx: ("a.pdf", b"x")):
@@ -185,7 +224,7 @@ class RouteTests(unittest.TestCase):
             vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "DT")
             self.assertEqual(vm["tags"].get("downloaded"), "recent")
         finally:
-            config.ATTACHMENTS_DIR = orig
+            config.WORKSPACE_DIR = orig
 
     def test_thread_highlights_with_active_search(self):
         self.store.add_mails([

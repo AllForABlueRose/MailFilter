@@ -2,7 +2,7 @@
 
 Each text field (main, optional, exclude, sender, recipient) is a boolean
 keyword expression parsed by :mod:`mailfilter.expr` (`,` = OR, `;` = AND,
-`[ ]` = grouping, `<{( regex )}>`). Matching runs against the derived "_"
+`[[ ]]` = grouping, `<{( regex )}>`). Matching runs against the derived "_"
 fields the MailStore computes at ingest, so a request does no datetime parsing
 or string lowering per mail. ``optional`` is parsed only for highlighting; it
 does not filter.

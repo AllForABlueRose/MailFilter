@@ -5,16 +5,18 @@ recipient; the datetime range is unaffected):
 
     expr    := term (op term)*               # evaluated strictly LEFT TO RIGHT
     op      := ',' (OR) | ';' (AND)
-    term    := literal | regex | '[' expr ']'   # [ ] groups are evaluated first
+    term    := literal | regex | '[[' expr ']]'  # [[ ]] groups are evaluated first
     regex   := '<{(' ... ')}>'               # inner text is a raw regex
-    literal := any run of characters between operators / brackets / regex
+    literal := any run of characters between operators / group brackets / regex
 
 There is **no operator precedence**: `a, b; c` means `(a OR b) AND c`. Use
-`[ ]` to group differently: `a; [b, c]` means `a AND (b OR c)`.
+`[[ ]]` to group differently: `a; [[b, c]]` means `a AND (b OR c)`.
 
-Regex blocks are recognized FIRST, so `,`, `;`, `[`, `]` inside a `<{( ... )}>`
-block are part of the pattern, never operators. Those four characters are
-otherwise reserved; to match one literally, put it in a regex (e.g. `<{(;)}>`).
+Grouping uses the doubled `[[` / `]]` so that a *single* `[` or `]` is an
+ordinary literal character (search terms often contain them). Regex blocks are
+recognized FIRST, so `,`, `;`, `[[`, `]]` inside a `<{( ... )}>` block are part
+of the pattern, never operators/brackets. `,`, `;`, `[[`, `]]` are otherwise
+reserved; to match one literally, put it in a regex (e.g. `<{(;)}>`).
 
 Matching is case-insensitive: literals are lowercased substring tests and
 regexes are compiled with re.IGNORECASE. Both run against the (already
@@ -30,6 +32,8 @@ import re
 
 _RE_OPEN = "<{("
 _RE_CLOSE = ")}>"
+_GROUP_OPEN = "[["
+_GROUP_CLOSE = "]]"
 
 
 class ExprError(ValueError):
@@ -46,8 +50,8 @@ def parse(text):
     if not tokens:
         return None
     node, pos = _parse_seq(tokens, 0, top=True)
-    if pos != len(tokens):  # a ']' with no matching '['
-        raise ExprError("unexpected ']'")
+    if pos != len(tokens):  # a ']]' with no matching '[['
+        raise ExprError("unexpected ']]'")
     return node
 
 
@@ -107,6 +111,14 @@ def _tokenize(text):
                 raise ExprError(f"invalid regex '{source}': {e}") from e
             tokens.append(("re", compiled, source))
             i = close + len(_RE_CLOSE)
+        elif text.startswith(_GROUP_OPEN, i):
+            flush()
+            tokens.append(("lb",))
+            i += len(_GROUP_OPEN)
+        elif text.startswith(_GROUP_CLOSE, i):
+            flush()
+            tokens.append(("rb",))
+            i += len(_GROUP_CLOSE)
         elif text[i] == ",":
             flush()
             tokens.append(("op", "OR"))
@@ -115,15 +127,9 @@ def _tokenize(text):
             flush()
             tokens.append(("op", "AND"))
             i += 1
-        elif text[i] == "[":
-            flush()
-            tokens.append(("lb",))
-            i += 1
-        elif text[i] == "]":
-            flush()
-            tokens.append(("rb",))
-            i += 1
         else:
+            # A single '[' or ']' falls through here and is kept as a literal
+            # character; only the doubled forms above are grouping.
             buf.append(text[i])
             i += 1
     flush()
@@ -139,9 +145,9 @@ def _parse_seq(tokens, pos, top):
         kind = tokens[pos][0]
         if kind == "rb":
             if top:
-                raise ExprError("unexpected ']'")
+                raise ExprError("unexpected ']]'")
             if expect_operand:
-                raise ExprError("empty group or dangling operator before ']'")
+                raise ExprError("empty group or dangling operator before ']]'")
             return ("seq", nodes, ops), pos + 1
         if expect_operand:
             if kind == "lb":
@@ -164,7 +170,7 @@ def _parse_seq(tokens, pos, top):
             else:  # two terms with no operator between them
                 raise ExprError("missing operator between terms")
     if not top:
-        raise ExprError("unterminated group (missing ']')")
+        raise ExprError("unterminated group (missing ']]')")
     if expect_operand:
         raise ExprError("expression ends with an operator")
     return ("seq", nodes, ops), pos

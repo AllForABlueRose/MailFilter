@@ -124,6 +124,7 @@ body{
     color:#374151;
     font-family:monospace;
     font-size:13px;
+    cursor:grab;           /* draggable into a search field */
 }
 .regex-input.drop-target{
     background:#eff6ff;
@@ -270,7 +271,7 @@ h3{
 .exclude-field[hidden]{
     display:none;
 }
-.person-drop.drop-target{
+input.drop-target{
     outline:2px solid #2563eb;
     outline-offset:1px;
 }
@@ -432,6 +433,67 @@ h3{
 .flip-btn:disabled{
     opacity:0.45;
     cursor:not-allowed;
+}
+/* The "Collect matching mails" hover popup. The wrapper anchors it; the popup
+   is a single-symbol box that scrolls through the available labels. It sits
+   flush against the button (top:100%, no gap) so moving the pointer from the
+   button into the popup never crosses a dead zone that would dismiss it. */
+.collect-wrap{
+    position:relative;
+    display:inline-flex;
+}
+.collect-wheel{
+    position:absolute;
+    top:100%;
+    left:50%;
+    transform:translateX(-50%);
+    width:40px;
+    height:40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;          /* clip the symbol as it slides in */
+    background:#fff;
+    border:1px solid #d1d5db;
+    border-radius:8px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.15);
+    z-index:20;
+    cursor:pointer;
+    font-size:20px;
+    user-select:none;
+}
+/* An element rule with `display` overrides the [hidden] UA style, so re-assert
+   it or the popup would never hide. */
+.collect-wheel[hidden]{
+    display:none;
+}
+.collect-wheel .collect-sym{
+    line-height:1;
+}
+.collect-wheel .collect-sym.grey{
+    filter:grayscale(1);
+    opacity:0.6;
+}
+/* Horizontal slide as the wheel cycles: the new symbol enters from the side the
+   scroll moved toward. */
+.collect-wheel .collect-sym.slide-next{
+    animation:collect-slide-next .15s ease-out;
+}
+.collect-wheel .collect-sym.slide-prev{
+    animation:collect-slide-prev .15s ease-out;
+}
+@keyframes collect-slide-next{
+    from{ transform:translateX(16px); opacity:0; }
+    to{ transform:translateX(0); opacity:1; }
+}
+@keyframes collect-slide-prev{
+    from{ transform:translateX(-16px); opacity:0; }
+    to{ transform:translateX(0); opacity:1; }
+}
+.collect-wheel.empty{
+    font-size:16px;
+    color:#9ca3af;
+    cursor:default;
 }
 .modal-body{
     overflow:auto;

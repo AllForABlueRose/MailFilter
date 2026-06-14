@@ -28,6 +28,17 @@ class LiteralTests(unittest.TestCase):
         self.assertTrue(matches("out of office", "i am out of office today"))
         self.assertFalse(matches("out of office", "out office"))
 
+    def test_single_brackets_are_literal(self):
+        # A lone '[' or ']' is an ordinary character, not grouping.
+        self.assertTrue(matches("[502]", "error code [502] returned"))
+        self.assertFalse(matches("[502]", "error code 502 returned"))
+        self.assertTrue(matches("a[1]", "the a[1] entry"))
+
+    def test_single_brackets_combine_with_operators(self):
+        # '[502]' and '[504]' here are two literals, OR'd by the comma.
+        self.assertTrue(matches("[502], [504]", "saw [504] today"))
+        self.assertFalse(matches("[502], [504]", "saw 504 today"))
+
 
 class BooleanTests(unittest.TestCase):
     def test_comma_is_or(self):
@@ -48,14 +59,14 @@ class BooleanTests(unittest.TestCase):
         self.assertFalse(matches("a; b, c", "a"))       # a AND b false, c missing
 
     def test_grouping_overrides_left_to_right(self):
-        # a; [b, c]  ==  a AND (b OR c)
-        self.assertTrue(matches("a; [b, c]", "a c"))
-        self.assertFalse(matches("a; [b, c]", "b c"))   # a missing
-        self.assertFalse(matches("a; [b, c]", "a d"))   # neither b nor c
+        # a; [[b, c]]  ==  a AND (b OR c)
+        self.assertTrue(matches("a; [[b, c]]", "a c"))
+        self.assertFalse(matches("a; [[b, c]]", "b c"))   # a missing
+        self.assertFalse(matches("a; [[b, c]]", "a d"))   # neither b nor c
 
     def test_nested_groups(self):
-        self.assertTrue(matches("[a; [b, c]]", "a b"))
-        self.assertFalse(matches("[a; [b, c]]", "b c"))
+        self.assertTrue(matches("[[a; [[b, c]]]]", "a b"))
+        self.assertFalse(matches("[[a; [[b, c]]]]", "b c"))
 
 
 class RegexTests(unittest.TestCase):
@@ -82,7 +93,7 @@ class RegexTests(unittest.TestCase):
 
 class OperandsTests(unittest.TestCase):
     def test_collects_all_leaves(self):
-        node = expr.parse("a; [b, <{(c)}>]")
+        node = expr.parse("a; [[b, <{(c)}>]]")
         leaves = expr.operands(node)
         self.assertEqual(len(leaves), 3)
         kinds = sorted(leaf[0] for leaf in leaves)
@@ -95,15 +106,15 @@ class OperandsTests(unittest.TestCase):
 class ErrorTests(unittest.TestCase):
     def test_unmatched_close_bracket(self):
         with self.assertRaises(ExprError):
-            expr.parse("a]")
+            expr.parse("a]]")
 
     def test_unterminated_group(self):
         with self.assertRaises(ExprError):
-            expr.parse("[a, b")
+            expr.parse("[[a, b")
 
     def test_empty_group(self):
         with self.assertRaises(ExprError):
-            expr.parse("[]")
+            expr.parse("[[]]")
 
     def test_leading_operator(self):
         with self.assertRaises(ExprError):
@@ -115,7 +126,7 @@ class ErrorTests(unittest.TestCase):
 
     def test_missing_operator_between_terms(self):
         with self.assertRaises(ExprError):
-            expr.parse("[a, b] [c, d]")
+            expr.parse("[[a, b]] [[c, d]]")
 
     def test_unterminated_regex(self):
         with self.assertRaises(ExprError):

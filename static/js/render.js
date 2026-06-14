@@ -28,6 +28,7 @@ function createCard(mail){
     const corner = document.createElement('div');
     corner.className = 'card-corner';
     const tags = mail.tags || {};
+    if(tags.marked){ corner.appendChild(makeTag('🎯', 'Marked', tags.marked)); }
     if(tags.downloaded){ corner.appendChild(makeTag('📥', 'Attachments downloaded', tags.downloaded)); }
     if(tags.links){ corner.appendChild(makeTag('🌐', 'Links opened', tags.links)); }
     card.appendChild(corner);

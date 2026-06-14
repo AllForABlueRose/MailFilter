@@ -98,7 +98,7 @@ class FilterMailsTests(unittest.TestCase):
 
     def test_main_grouping(self):
         # (server OR newsletter) AND alpha  -> only 'a'
-        self.assertEqual(self._ids({"main": "[server, newsletter]; alpha"}), ["a"])
+        self.assertEqual(self._ids({"main": "[[server, newsletter]]; alpha"}), ["a"])
 
     def test_main_ignores_sender_and_recipient(self):
         # 'alice' is a's sender and 'bob' a's recipient — keyword search sees neither.

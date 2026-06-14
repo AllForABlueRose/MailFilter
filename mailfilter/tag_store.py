@@ -19,7 +19,7 @@ from . import persistence
 log = logging.getLogger(__name__)
 
 RECENT_DAYS = 7
-ACTIONS = ("downloaded", "links")
+ACTIONS = ("downloaded", "links", "marked")
 _TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -51,6 +51,19 @@ class TagStore:
         now = datetime.now().strftime(_TS_FORMAT)
         with self._lock:
             self._tags.setdefault(mail_id, {})[action] = now
+            self._save()
+
+    def remove(self, mail_id, action):
+        """Clear ``action`` from ``mail_id`` (e.g. the user unmarks a mail)."""
+        if not mail_id or action not in ACTIONS:
+            return
+        with self._lock:
+            actions = self._tags.get(mail_id)
+            if not actions or action not in actions:
+                return
+            del actions[action]
+            if not actions:
+                del self._tags[mail_id]
             self._save()
 
     def tags_for(self, mail_id):

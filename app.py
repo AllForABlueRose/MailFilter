@@ -1,4 +1,4 @@
-"""Entry point for the Mail Analyzer app."""
+"""Entry point for the Mail Analyzer 2.0 app."""
 
 import logging
 
