@@ -124,6 +124,9 @@ async function loadMail(){
 
     document.getElementById('lastRefresh').innerText = data.last_refresh;
     let status = data.fetch_status;
+    if(data.fetch_progress){
+        status += " | " + data.fetch_progress;
+    }
     if(data.fetch_error){
         status += " | " + data.fetch_error;
     }

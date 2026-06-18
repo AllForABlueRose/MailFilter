@@ -233,6 +233,20 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(snap["fetch_status"], "Failed")
         self.assertEqual(snap["fetch_error"], "boom")
 
+    def test_progress_is_reported_then_cleared_by_terminal_states(self):
+        self.store.set_fetching()
+        self.store.set_progress("Initial sync: 100/200 mails (50%)")
+        self.assertEqual(
+            self.store.status_snapshot()["fetch_progress"],
+            "Initial sync: 100/200 mails (50%)",
+        )
+        # A terminal status clears the in-progress line.
+        self.store.set_success(5)
+        self.assertEqual(self.store.status_snapshot()["fetch_progress"], "")
+        self.store.set_progress("Syncing... 3 new so far")
+        self.store.set_failure(RuntimeError("boom"))
+        self.assertEqual(self.store.status_snapshot()["fetch_progress"], "")
+
 
 def _temp_store():
     # Cache path inside a temp dir; the file need not exist yet.

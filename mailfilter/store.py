@@ -75,6 +75,7 @@ class MailStore:
         self._last_refresh = None
         self._fetch_status = "Not started"
         self._fetch_error = ""
+        self._fetch_progress = ""
 
     # ----- persistence -----
 
@@ -211,17 +212,29 @@ class MailStore:
         with self._lock:
             self._fetch_status = "Fetching..."
             self._fetch_error = ""
+            self._fetch_progress = ""
+
+    def set_progress(self, text):
+        """Mid-fetch progress line (e.g. "Initial sync: 1,200/8,003 mails (15%)").
+
+        Surfaced through :meth:`status_snapshot` so the UI status box can show a
+        long initial sync advancing. Cleared by the terminal status setters.
+        """
+        with self._lock:
+            self._fetch_progress = text
 
     def set_success(self, fetched_count):
         with self._lock:
             self._last_refresh = datetime.now()
             self._fetch_status = f"Success ({fetched_count} new)"
             self._fetch_error = ""
+            self._fetch_progress = ""
 
     def set_failure(self, error):
         with self._lock:
             self._fetch_status = "Failed"
             self._fetch_error = str(error)
+            self._fetch_progress = ""
 
     def status_snapshot(self):
         with self._lock:
@@ -233,4 +246,5 @@ class MailStore:
                 ),
                 "fetch_status": self._fetch_status,
                 "fetch_error": self._fetch_error,
+                "fetch_progress": self._fetch_progress,
             }
