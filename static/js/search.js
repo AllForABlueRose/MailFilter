@@ -27,6 +27,7 @@ function toggleResources(){
     resourcesOnly = !resourcesOnly;
     syncResourcesButton();
     saveSettings();
+    highlightActiveTemplate();
     loadMail();
 }
 
@@ -50,26 +51,28 @@ function saveSettings(){
 async function restoreSettings(){
     try{
         const response = await fetch('/api/settings');
-        const settings = await response.json();
-        for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
-            document.getElementById(id).value = settings[key] || '';
-        }
-        resourcesOnly = !!settings.resources;
-        syncResourcesButton();
-        // Reveal an exclude field if it was previously used.
-        Object.keys(EXCLUDE_FIELDS).forEach(which => {
-            if(document.getElementById(EXCLUDE_FIELDS[which].field).value){
-                setExcludeVisible(which, true);
-            }
-        });
-        // Reveal the blacklist dropdown if either field was previously used.
-        if(document.getElementById('attachmentBlacklist').value
-           || document.getElementById('linksBlacklist').value){
-            setBlacklistVisible(true);
-        }
+        applySettings(await response.json());
     }catch(e){
         // No saved settings (or fetch failed) — start from blank defaults.
     }
+}
+
+// Populate every sidebar field from a settings object (the shape /api/settings
+// and each template return). Shared by restore-on-load and template switching.
+function applySettings(settings){
+    settings = settings || {};
+    for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
+        document.getElementById(id).value = settings[key] || '';
+    }
+    resourcesOnly = !!settings.resources;
+    syncResourcesButton();
+    // Reveal an exclude field if it carries a value.
+    Object.keys(EXCLUDE_FIELDS).forEach(which => {
+        setExcludeVisible(which, !!document.getElementById(EXCLUDE_FIELDS[which].field).value);
+    });
+    // Reveal the blacklist dropdown if either field carries a value.
+    setBlacklistVisible(!!document.getElementById('attachmentBlacklist').value
+                        || !!document.getElementById('linksBlacklist').value);
 }
 
 // ----- collapsible exclude fields (keywords / sender / recipient) -----
@@ -104,6 +107,7 @@ function applyFilters(){
     clearTray();
     closeTray();
     saveSettings();
+    highlightActiveTemplate();  // the search may now match (or no longer match) a template
     loadMail();
 }
 

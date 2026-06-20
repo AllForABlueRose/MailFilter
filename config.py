@@ -18,6 +18,14 @@ SETTINGS_FILE = BASE_DIR / "settings_cache.json"
 # Per-mail workspace action tags (attachments downloaded / links opened) with
 # timestamps, so the tags persist across sessions and grey out after a week.
 TAGS_FILE = BASE_DIR / "tags_cache.json"
+# Named, switchable search templates (presets) live as individual PNG image
+# files in this directory — one file per template, in the exact format the
+# export/import feature uses (see mailfilter/imgcodec.py). The folder *is* the
+# storage: there is no separate JSON cache. NOTE: deliberately not "templates/",
+# which is the Jinja/HTML template folder. Because each file doubles as the
+# portable export, template contents are obfuscated (image-packed) rather than
+# DPAPI-encrypted at rest — search presets are far less sensitive than mail.
+TEMPLATES_DIR = BASE_DIR / "search_templates"
 # Workspace exports — "download all attachments" and "export report" — save into
 # a dated subfolder here (see routes.api_download / routes.api_report). Single
 # attachment downloads remain streamed lazily from Outlook and are never

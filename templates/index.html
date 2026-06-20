@@ -10,6 +10,26 @@
   <div class="sidebar">
     <h2>Mail Analyzer 2.0</h2>
 
+    <div class="template-bar">
+      <select id="templateSelect" onchange="switchTemplate()"
+              title="Switch between saved search templates">
+        <option value="">— Templates —</option>
+      </select>
+      <div class="template-actions">
+        <button type="button" class="tmpl-btn" onclick="saveTemplate()"
+                title="Save the current search as a template">💾</button>
+        <button type="button" id="templateExport" class="tmpl-btn" onclick="exportTemplate()"
+                title="Export the selected template to an image file" disabled>⬇</button>
+        <button type="button" class="tmpl-btn"
+                onclick="document.getElementById('templateFile').click()"
+                title="Import a template from an image file">⬆</button>
+        <button type="button" id="templateDelete" class="tmpl-btn" onclick="deleteTemplate()"
+                title="Delete the selected template" disabled>🗑</button>
+        <input type="file" id="templateFile" accept="image/png" hidden
+               onchange="importTemplate(this)">
+      </div>
+    </div>
+
     <label>From Date/Time</label>
     <input type="datetime-local" id="startDate">
 
@@ -151,6 +171,7 @@
 <script src="{{ url_for('static', filename='js/state.js') }}"></script>
 <script src="{{ url_for('static', filename='js/render.js') }}"></script>
 <script src="{{ url_for('static', filename='js/search.js') }}"></script>
+<script src="{{ url_for('static', filename='js/templates.js') }}"></script>
 <script src="{{ url_for('static', filename='js/thread.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 <script src="{{ url_for('static', filename='js/regex.js') }}"></script>

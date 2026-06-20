@@ -5,6 +5,7 @@ before create_app) so the real mail_cache.json is never touched, and no
 scheduler or Outlook initializer is ever started.
 """
 
+import io
 import shutil
 import tempfile
 import unittest
@@ -28,9 +29,11 @@ class RouteTests(unittest.TestCase):
         self._orig_cache = config.CACHE_FILE
         self._orig_settings = config.SETTINGS_FILE
         self._orig_tags = config.TAGS_FILE
+        self._orig_templates = config.TEMPLATES_DIR
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
         config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
         config.TAGS_FILE = Path(self._tmpdir) / "tags.json"
+        config.TEMPLATES_DIR = Path(self._tmpdir) / "search_templates"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -43,6 +46,7 @@ class RouteTests(unittest.TestCase):
         config.CACHE_FILE = self._orig_cache
         config.SETTINGS_FILE = self._orig_settings
         config.TAGS_FILE = self._orig_tags
+        config.TEMPLATES_DIR = self._orig_templates
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -269,6 +273,75 @@ class RouteTests(unittest.TestCase):
 
     def test_post_settings_rejects_non_object(self):
         resp = self.client.post("/api/settings", json=["not", "a", "dict"])
+        self.assertEqual(resp.status_code, 400)
+
+    # ----- search templates -----
+
+    def test_templates_empty_initially(self):
+        data = self.client.get("/api/templates").get_json()
+        self.assertEqual(data, {"names": [], "templates": {}})
+
+    def test_save_template_then_list(self):
+        self.client.post("/api/templates", json={"name": "Work", "settings": {"main": "report"}})
+        data = self.client.get("/api/templates").get_json()
+        self.assertEqual(data["names"], ["Work"])
+        self.assertEqual(data["templates"]["Work"]["main"], "report")
+
+    def test_save_template_requires_name(self):
+        resp = self.client.post("/api/templates", json={"settings": {"main": "x"}})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_save_template_rejects_non_object(self):
+        self.assertEqual(self.client.post("/api/templates", json=[1, 2]).status_code, 400)
+
+    def test_delete_template(self):
+        self.client.post("/api/templates", json={"name": "A", "settings": {}})
+        data = self.client.delete("/api/templates/A").get_json()
+        self.assertEqual(data["names"], [])
+
+    def test_export_returns_png_image(self):
+        self.client.post("/api/templates", json={"name": "A", "settings": {"main": "x"}})
+        resp = self.client.post("/api/templates/export", json={"name": "A"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, "image/png")
+        self.assertTrue(resp.data.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_export_unknown_template_is_404(self):
+        resp = self.client.post("/api/templates/export", json={"name": "ghost"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_export_then_import_round_trips_the_template(self):
+        self.client.post(
+            "/api/templates",
+            json={"name": "RoundTrip", "settings": {"main": "needle", "resources": True}},
+        )
+        png = self.client.post("/api/templates/export", json={"name": "RoundTrip"}).data
+        # Drop it, then import the image back.
+        self.client.delete("/api/templates/RoundTrip")
+        self.assertEqual(self.client.get("/api/templates").get_json()["names"], [])
+
+        resp = self.client.post(
+            "/api/templates/import",
+            data={"file": (io.BytesIO(png), "RoundTrip.png")},
+            content_type="multipart/form-data",
+        )
+        data = resp.get_json()
+        self.assertEqual(data["imported"], "RoundTrip")
+        self.assertEqual(data["templates"]["RoundTrip"]["main"], "needle")
+        self.assertIs(data["templates"]["RoundTrip"]["resources"], True)
+
+    def test_import_rejects_non_template_image(self):
+        resp = self.client.post(
+            "/api/templates/import",
+            data={"file": (io.BytesIO(b"not a png"), "x.png")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_import_without_file_is_400(self):
+        resp = self.client.post(
+            "/api/templates/import", data={}, content_type="multipart/form-data"
+        )
         self.assertEqual(resp.status_code, 400)
 
 

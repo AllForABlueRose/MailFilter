@@ -241,6 +241,101 @@ class ListAttachmentsTests(unittest.TestCase):
         self.assertEqual(outlook._list_attachments(_Broken()), [])
 
 
+class _FakeExchangeUser:
+    def __init__(self, smtp):
+        self.PrimarySmtpAddress = smtp
+
+
+class _FakePropertyAccessor:
+    """Maps PR_SMTP_ADDRESS to a value; raises on any other tag, as Outlook does
+    when the property is absent."""
+
+    def __init__(self, smtp_by_tag):
+        self._smtp_by_tag = smtp_by_tag
+
+    def GetProperty(self, tag):
+        if tag in self._smtp_by_tag:
+            return self._smtp_by_tag[tag]
+        raise RuntimeError("property not found")
+
+
+class _FakeAddressEntry:
+    def __init__(self, exchange_user=None, prop_smtp=None):
+        self._exchange_user = exchange_user
+        if prop_smtp is not None:
+            self.PropertyAccessor = _FakePropertyAccessor(
+                {outlook.PR_SMTP_ADDRESS: prop_smtp}
+            )
+
+    def GetExchangeUser(self):
+        return self._exchange_user
+
+
+class _FakeRecipient:
+    def __init__(self, address, address_entry=None, name="R"):
+        self.Address = address
+        self.Name = name
+        self.Type = 1
+        if address_entry is not None:
+            self.AddressEntry = address_entry
+
+
+class _FakeSenderItem:
+    def __init__(self, sender_address, sender=None):
+        self.SenderEmailAddress = sender_address
+        if sender is not None:
+            self.Sender = sender
+
+
+class ExchangeAddressResolutionTests(unittest.TestCase):
+    """The Exchange-DN fix: legacy X.500 DNs ("/O=EXCHANGELABS/...") are resolved
+    to real SMTP addresses; plain SMTP addresses pass through untouched."""
+
+    EX_DN = "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=abc"
+
+    def test_smtp_address_is_not_an_exchange_dn(self):
+        self.assertFalse(outlook._is_exchange_dn("alice@example.com"))
+
+    def test_legacy_dn_is_an_exchange_dn(self):
+        self.assertTrue(outlook._is_exchange_dn(self.EX_DN))
+        self.assertTrue(outlook._is_exchange_dn("/o=lowercase/cn=x"))
+
+    def test_sender_plain_smtp_passes_through(self):
+        item = _FakeSenderItem("alice@example.com")  # no Sender needed
+        self.assertEqual(outlook._sender_email(item), "alice@example.com")
+
+    def test_sender_dn_resolved_via_exchange_user(self):
+        item = _FakeSenderItem(
+            self.EX_DN, sender=_FakeAddressEntry(_FakeExchangeUser("bob@corp.com"))
+        )
+        self.assertEqual(outlook._sender_email(item), "bob@corp.com")
+
+    def test_sender_dn_resolved_via_property_accessor_when_no_exchange_user(self):
+        # Distribution lists have no ExchangeUser; PR_SMTP_ADDRESS still resolves.
+        item = _FakeSenderItem(
+            self.EX_DN, sender=_FakeAddressEntry(prop_smtp="list@corp.com")
+        )
+        self.assertEqual(outlook._sender_email(item), "list@corp.com")
+
+    def test_sender_dn_falls_back_to_raw_when_unresolvable(self):
+        item = _FakeSenderItem(self.EX_DN, sender=_FakeAddressEntry())
+        self.assertEqual(outlook._sender_email(item), self.EX_DN)
+
+    def test_recipient_plain_smtp_passes_through(self):
+        rcpt = _FakeRecipient("carol@example.com")
+        self.assertEqual(outlook._recipient_email(rcpt), "carol@example.com")
+
+    def test_recipient_dn_resolved_via_exchange_user(self):
+        rcpt = _FakeRecipient(
+            self.EX_DN, _FakeAddressEntry(_FakeExchangeUser("dave@corp.com"))
+        )
+        self.assertEqual(outlook._recipient_email(rcpt), "dave@corp.com")
+
+    def test_recipient_dn_falls_back_to_raw_when_unresolvable(self):
+        rcpt = _FakeRecipient(self.EX_DN, _FakeAddressEntry())
+        self.assertEqual(outlook._recipient_email(rcpt), self.EX_DN)
+
+
 try:
     import win32com  # noqa: F401
     HAVE_PYWIN32 = True

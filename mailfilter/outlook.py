@@ -33,6 +33,13 @@ _fetch_lock = threading.Lock()
 # i.e. classic Outlook desktop is not installed on this machine.
 CO_E_CLASSSTRING = -2147221005
 
+# MAPI property tag for an AddressEntry's SMTP address (PR_SMTP_ADDRESS, unicode
+# variant). Used to recover the real email when Exchange hands back a legacy
+# X.500 DN ("/O=EXCHANGELABS/OU=...") instead of an SMTP address — see
+# _smtp_from_address_entry. Covers distribution lists / contacts that have no
+# ExchangeUser object.
+PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
+
 
 class OutlookUnavailableError(RuntimeError):
     """Outlook cannot be reached on this machine (expected on dev boxes)."""
@@ -283,12 +290,81 @@ def _to_naive_datetime(com_time):
     )
 
 
-def _parse_item(item, entry_id, received):
-    sender_email = ""
+def _is_exchange_dn(address):
+    """True if ``address`` is a legacy Exchange X.500 DN rather than an SMTP
+    address. These start with "/O=" (or "/o=") and carry no "@"; an SMTP address
+    never starts with "/". Internal Exchange / Microsoft 365 mail comes back as a
+    DN, which is what we need to resolve to a real address."""
+    return address.startswith("/")
+
+
+def _smtp_from_address_entry(address_entry):
+    """Best-effort SMTP address for an Outlook AddressEntry, or "" if none.
+
+    For Exchange recipients the AddressEntry's ``.Address`` is a legacy X.500 DN,
+    not an email address. Recover the real SMTP address via the Exchange user
+    object first, then fall back to the PR_SMTP_ADDRESS MAPI property (which also
+    covers distribution lists and contacts that expose no ExchangeUser). Every
+    access is defensive: a single unreadable property must never abort the parse.
+    """
+    if address_entry is None:
+        return ""
     try:
-        sender_email = str(item.SenderEmailAddress)
+        exchange_user = address_entry.GetExchangeUser()
+    except Exception:
+        exchange_user = None
+    if exchange_user is not None:
+        try:
+            smtp = str(exchange_user.PrimarySmtpAddress)
+            if smtp:
+                return smtp
+        except Exception:
+            pass
+    try:
+        smtp = str(address_entry.PropertyAccessor.GetProperty(PR_SMTP_ADDRESS))
+        if smtp:
+            return smtp
     except Exception:
         pass
+    return ""
+
+
+def _sender_email(item):
+    """SMTP sender address, recovering it from Exchange when Outlook returns a
+    legacy X.500 DN (``SenderEmailAddress`` for internal mail). Falls back to the
+    raw value if resolution yields nothing."""
+    try:
+        address = str(item.SenderEmailAddress)
+    except Exception:
+        return ""
+    if not _is_exchange_dn(address):
+        return address
+    try:
+        smtp = _smtp_from_address_entry(item.Sender)
+    except Exception:
+        smtp = ""
+    return smtp or address
+
+
+def _recipient_email(recipient):
+    """SMTP address for a Recipient, recovering it from Exchange (via its
+    AddressEntry) when ``.Address`` is a legacy X.500 DN. Falls back to the raw
+    value if resolution yields nothing."""
+    try:
+        address = str(recipient.Address)
+    except Exception:
+        return ""
+    if not _is_exchange_dn(address):
+        return address
+    try:
+        smtp = _smtp_from_address_entry(recipient.AddressEntry)
+    except Exception:
+        smtp = ""
+    return smtp or address
+
+
+def _parse_item(item, entry_id, received):
+    sender_email = _sender_email(item)
 
     # Split recipients by type (olTo=1, olCC=2, olBCC=3). BCC is not exposed on
     # received mail, so it never appears here. Names and addresses are appended
@@ -305,10 +381,7 @@ def _parse_item(item, entry_id, received):
                 name = str(recipient.Name)
             except Exception:
                 name = ""
-            try:
-                addr = str(recipient.Address)
-            except Exception:
-                addr = ""
+            addr = _recipient_email(recipient)
             if rtype == 2:  # olCC
                 cc_names.append(name)
                 cc_emails.append(addr)

@@ -35,6 +35,27 @@ DEFAULTS = {
 MAX_LEN = 500
 
 
+def coerce(raw, base=None):
+    """Return ``base`` with the known string/bool search fields from ``raw`` applied.
+
+    The single source of truth for the search-settings schema: the last-used
+    search (:class:`SettingsStore`) and each saved template
+    (:class:`mailfilter.template_store.TemplateStore`) both pass their input
+    through here, so a settings dict can only ever hold the known fields, typed
+    and length-capped. Unknown keys are dropped; missing keys keep ``base``.
+    ``base`` defaults to :data:`DEFAULTS`.
+    """
+    out = dict(DEFAULTS if base is None else base)
+    if not isinstance(raw, dict):
+        return out
+    for key, default in DEFAULTS.items():
+        if key not in raw or raw[key] is None:
+            continue
+        value = raw[key]
+        out[key] = bool(value) if isinstance(default, bool) else str(value)[:MAX_LEN]
+    return out
+
+
 class SettingsStore:
 
     def __init__(self, cache_file):
@@ -47,7 +68,7 @@ class SettingsStore:
         if isinstance(raw, dict):
             with self._lock:
                 # Start from DEFAULTS so any missing/legacy keys are filled in.
-                self._settings = self._coerce(raw, DEFAULTS)
+                self._settings = coerce(raw, DEFAULTS)
             log.info("Loaded search settings from cache")
 
     def snapshot(self):
@@ -57,20 +78,9 @@ class SettingsStore:
     def update(self, raw):
         """Merge known fields from ``raw`` over the current settings; persist."""
         with self._lock:
-            self._settings = self._coerce(raw, self._settings)
+            self._settings = coerce(raw, self._settings)
             self._save()
             return dict(self._settings)
-
-    @staticmethod
-    def _coerce(raw, base):
-        """Return ``base`` with the known string/bool fields from ``raw`` applied."""
-        out = dict(base)
-        for key, default in DEFAULTS.items():
-            if key not in raw or raw[key] is None:
-                continue
-            value = raw[key]
-            out[key] = bool(value) if isinstance(default, bool) else str(value)[:MAX_LEN]
-        return out
 
     def _save(self):
         # Caller must hold the lock.

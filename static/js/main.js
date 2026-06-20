@@ -108,6 +108,7 @@ async function init(){
     });
 
     await restoreSettings();   // repopulate the sidebar from the saved search
+    loadTemplates();           // populate the search-template dropdown
     loadMail();
     setInterval(loadMail, 30000);
 }

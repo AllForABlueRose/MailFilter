@@ -26,7 +26,7 @@ from .presenter import to_view_model
 log = logging.getLogger(__name__)
 
 
-def create_blueprint(store, settings, tag_store):
+def create_blueprint(store, settings, tag_store, template_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -49,6 +49,59 @@ def create_blueprint(store, settings, tag_store):
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
         return jsonify(settings.update(data))
+
+    @bp.get("/api/templates")
+    def list_templates():
+        return jsonify(template_store.snapshot())
+
+    @bp.post("/api/templates")
+    def save_template():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        try:
+            return jsonify(template_store.save(data.get("name"), data.get("settings")))
+        except ValueError as e:
+            abort(400, description=str(e))
+
+    @bp.delete("/api/templates/<name>")
+    def delete_template(name):
+        return jsonify(template_store.delete(name))
+
+    @bp.post("/api/templates/export")
+    def export_template():
+        """Export one template as a PNG image file (its bytes packed into the
+        pixels). Body: ``{"name": <template name>}``. Returns an ``image/png``
+        download — not JSON, not encrypted, not human-legible — that
+        ``/api/templates/import`` round-trips. See mailfilter/imgcodec.py."""
+        data = request.get_json(silent=True) or {}
+        name = data.get("name")
+        png = template_store.export_image(name)
+        if png is None:
+            abort(404, description="unknown template")
+        download = util.safe_filename(f"{name}.png", "template.png")
+        return send_file(
+            BytesIO(png),
+            mimetype="image/png",
+            as_attachment=True,
+            download_name=download,
+        )
+
+    @bp.post("/api/templates/import")
+    def import_template():
+        """Import a template from an uploaded PNG produced by the export route.
+
+        Multipart form field ``file``. The image is decoded back to a template and
+        saved (overwriting a same-named one). Returns the snapshot plus
+        ``imported`` (the template's name)."""
+        upload = request.files.get("file")
+        if upload is None:
+            abort(400, description="no file uploaded")
+        try:
+            name, snapshot = template_store.import_image(upload.read())
+        except (ValueError, KeyError, TypeError):
+            abort(400, description="not a valid template image")
+        return jsonify({"imported": name, **snapshot})
 
     @bp.post("/refresh")
     def refresh_now():

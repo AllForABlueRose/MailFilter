@@ -11,3 +11,5 @@ let traySortNewestFirst = true;   // workspace sort direction (toggled by the bu
 
 let threadMails = [];       // mails shown in the thread/message popup
 let threadOldestFirst = true;
+
+let templateBodies = {};    // template name -> settings, from the last /api/templates load
