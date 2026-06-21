@@ -13,3 +13,12 @@ let threadMails = [];       // mails shown in the thread/message popup
 let threadOldestFirst = true;
 
 let templateBodies = {};    // template name -> settings, from the last /api/templates load
+
+let automationsById = {};       // id -> automation, from the last /api/automations load
+let editingAutomationId = null;  // id open in the builder, or null when creating a new one
+
+let customersById = {};         // id -> organization, from the last /api/organizations load
+let editingOrgId = null;         // id open in the org builder, or null when creating a new one
+let contactDirectory = [];       // aggregated+resolved contacts, from the last /api/contacts load
+let selectedOrgId = null;        // org whose contacts the directory shows; null = unassigned contacts
+let roleSortRepsOnTop = false;   // org-contact sort: representatives first when true, members first when false

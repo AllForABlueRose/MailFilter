@@ -1,12 +1,8 @@
 """HTTP layer: thin routes that delegate to store / filters / presenter."""
 
-import csv
-import io
 import logging
 import threading
-from datetime import datetime
 from io import BytesIO
-from pathlib import Path
 
 from flask import (
     Blueprint,
@@ -17,16 +13,15 @@ from flask import (
     send_file,
 )
 
-import config
-
-from . import outlook, util
+from . import automation, customers, outlook, util, workspace_ops
 from .filters import MailQuery, filter_mails
 from .presenter import to_view_model
 
 log = logging.getLogger(__name__)
 
 
-def create_blueprint(store, settings, tag_store, template_store):
+def create_blueprint(store, settings, tag_store, template_store, automation_store,
+                     customer_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -140,7 +135,7 @@ def create_blueprint(store, settings, tag_store, template_store):
     def download_attachment(mail_id, index):
         # Validate against the cache first: gives a clean 404 for unknown
         # mail/index and a filename fallback if Outlook reports none.
-        att = _find_attachment(store, mail_id, index)
+        att = workspace_ops.find_attachment(store, mail_id, index)
         if att is None:
             abort(404)
         try:
@@ -170,36 +165,11 @@ def create_blueprint(store, settings, tag_store, template_store):
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
-        items = data.get("items") or []
 
-        folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
-        folder.mkdir(parents=True, exist_ok=True)
-
-        saved, errors = [], []
-        for item in items:
-            mail_id = (item or {}).get("id")
-            index = (item or {}).get("index")
-            att = _find_attachment(store, mail_id, index) if isinstance(index, int) else None
-            if att is None:
-                errors.append(f"{mail_id}#{index}: unknown attachment")
-                continue
-            try:
-                filename, blob = outlook.fetch_attachment(mail_id, index)
-            except outlook.OutlookUnavailableError as e:
-                errors.append(str(e))
-                continue
-            except LookupError as e:
-                errors.append(f"{mail_id}#{index}: {e}")
-                continue
-            target = _unique_path(folder, filename or att["filename"], index)
-            target.write_bytes(blob)
-            saved.append({"id": mail_id, "index": index, "name": target.name})
-
+        folder, saved, errors = workspace_ops.save_attachments(store, data.get("items") or [])
         for mid in {s["id"] for s in saved}:
             tag_store.record(mid, "downloaded")
-
-        log.info("Saved %d attachment(s) to %s (%d error(s))", len(saved), folder, len(errors))
-        return jsonify({"folder": str(folder), "saved": saved, "errors": errors})
+        return jsonify({"folder": folder, "saved": saved, "errors": errors})
 
     @bp.post("/api/tags")
     def api_tags():
@@ -227,78 +197,130 @@ def create_blueprint(store, settings, tag_store, template_store):
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
 
-        by_id = {m["id"]: m for m in store.snapshot()}
-        rows = []
-        for mail_id in data.get("ids") or []:
-            mail = by_id.get(mail_id)
-            if mail is None:
-                continue
-            rows.append([
-                mail.get("received", ""),
-                mail.get("subject", ""),
-                _people_text(mail.get("recipient_names", []), mail.get("recipient_emails", [])),
-                _person_text(mail.get("sender", ""), mail.get("sender_email", "")),
-            ])
+        folder, name, count = workspace_ops.write_report(store, data.get("ids") or [])
+        return jsonify({"folder": folder, "name": name, "count": count})
 
-        now = datetime.now()
-        folder = config.WORKSPACE_DIR / now.strftime("%Y-%m-%d")
-        folder.mkdir(parents=True, exist_ok=True)
-        target = _unique_path(folder, f"report_{now.strftime('%Y-%m-%d')}.csv", 0)
+    # ----- Automations -----
 
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["Datetime", "subject", "recipient", "sender"])
-        writer.writerows(rows)
-        # utf-8-sig so Excel opens the file with the right encoding.
-        target.write_text(buf.getvalue(), encoding="utf-8-sig", newline="")
+    @bp.get("/api/automations")
+    def list_automations():
+        return jsonify({"automations": automation_store.snapshot()})
 
-        log.info("Exported report of %d mail(s) to %s", len(rows), target)
-        return jsonify({"folder": str(folder), "name": target.name, "count": len(rows)})
+    @bp.post("/api/automations")
+    def create_automation():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(automation_store.create(data))
+
+    @bp.put("/api/automations/<aid>")
+    def update_automation(aid):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        updated = automation_store.update(aid, data)
+        if updated is None:
+            abort(404)
+        return jsonify(updated)
+
+    @bp.delete("/api/automations/<aid>")
+    def delete_automation(aid):
+        automation_store.delete(aid)
+        return jsonify({"automations": automation_store.snapshot()})
+
+    @bp.post("/api/automations/<aid>/toggle")
+    def toggle_automation(aid):
+        data = request.get_json(silent=True) or {}
+        updated = automation_store.set_enabled(aid, bool(data.get("enabled")))
+        if updated is None:
+            abort(404)
+        return jsonify(updated)
+
+    @bp.post("/api/automations/<aid>/run")
+    def run_automation_now(aid):
+        by_id = {a["id"]: a for a in automation_store.snapshot()}
+        auto = by_id.get(aid)
+        if auto is None:
+            abort(404)
+
+        def _go():
+            status = automation.run_automation(auto, store, tag_store)
+            if status is not None:
+                automation_store.mark_run(aid, status)
+
+        threading.Thread(target=_go, daemon=True).start()
+        return jsonify({"status": "started"})
+
+    # ----- Customer Management -----
+
+    @bp.get("/api/organizations")
+    def list_organizations():
+        return jsonify({"organizations": customer_store.snapshot()})
+
+    @bp.post("/api/organizations")
+    def create_organization():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(customer_store.create(data))
+
+    @bp.put("/api/organizations/<oid>")
+    def update_organization(oid):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        updated = customer_store.update(oid, data)
+        if updated is None:
+            abort(404)
+        return jsonify(updated)
+
+    @bp.delete("/api/organizations/<oid>")
+    def delete_organization(oid):
+        customer_store.delete(oid)
+        return jsonify({"organizations": customer_store.snapshot()})
+
+    @bp.post("/api/organizations/<oid>/domains")
+    def add_organization_domain(oid):
+        # Drag-a-domain onto an org: map the whole domain to it (default "member"),
+        # so everyone on that domain resolves to the org. Moves the domain off any
+        # other org first (set_domain).
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        org = customer_store.set_domain(oid, data.get("domain"), data.get("role", "member"))
+        if org is None:
+            abort(404, description="unknown organization or blank domain")
+        return jsonify(org)
+
+    @bp.get("/api/contacts")
+    def list_contacts():
+        # The contact directory is derived live from the mail cache and resolved
+        # against the org definitions. Both snapshots are copies; take them
+        # back-to-back so a concurrent assign can't split the view.
+        directory = customers.build_directory(store.snapshot(), customer_store.snapshot())
+        return jsonify({"contacts": directory})
+
+    @bp.post("/api/contacts/assign")
+    def assign_contact():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        # A representative must have a base organization first: you record who a
+        # contact works for (Member) before who they front for (Representative).
+        if data.get("role") == "representative" \
+                and not customer_store.has_member_base(data.get("email")):
+            abort(409, description="set the contact's base organization (a Member "
+                                   "assignment) before assigning them as a Representative")
+        org = customer_store.assign(data.get("email"), data.get("org_id"), data.get("role"))
+        if org is None:
+            abort(404, description="unknown organization or blank email")
+        return jsonify(org)
+
+    @bp.post("/api/contacts/unassign")
+    def unassign_contact():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify({"removed": customer_store.unassign(data.get("email"))})
 
     return bp
-
-
-def _person_text(name, email):
-    """Format one person as ``Name <email>`` (falling back to whichever exists)."""
-    name = (name or "").strip()
-    email = (email or "").strip()
-    if name and email:
-        return f"{name} <{email}>"
-    return name or email
-
-
-def _people_text(names, emails):
-    """Join paired name/email lists into ``Name <email>; ...`` for one CSV cell."""
-    people = []
-    for i in range(max(len(names), len(emails))):
-        text = _person_text(
-            names[i] if i < len(names) else "",
-            emails[i] if i < len(emails) else "",
-        )
-        if text:
-            people.append(text)
-    return "; ".join(people)
-
-
-def _unique_path(folder, filename, index):
-    """A non-colliding path inside ``folder`` for a sanitized ``filename``."""
-    safe = util.safe_filename(filename, f"attachment_{index}")
-    candidate = folder / safe
-    if not candidate.exists():
-        return candidate
-    stem, suffix = Path(safe).stem, Path(safe).suffix
-    n = 1
-    while (folder / f"{stem}_{n}{suffix}").exists():
-        n += 1
-    return folder / f"{stem}_{n}{suffix}"
-
-
-def _find_attachment(store, mail_id, index):
-    """Look up a single stored attachment entry, or None if absent."""
-    for mail in store.snapshot():
-        if mail["id"] == mail_id:
-            attachments = mail.get("attachments", [])
-            if 0 <= index < len(attachments):
-                return attachments[index]
-            return None
-    return None

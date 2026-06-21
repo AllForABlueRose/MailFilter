@@ -2,10 +2,289 @@ body{
     margin:0;
     font-family:Arial;
     background:#f3f4f6;
+    height:100vh;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
 }
 .container{
     display:flex;
-    height:100vh;
+    flex:1;
+    min-height:0;
+}
+/* Global app-shell header. An invisible fixed strip at the very top edge reveals the header,
+   which drops down and grows the flex column, bumping the workspace down rather
+   than overlaying it. Future views slot in as more .appnav-item buttons. */
+#hoverStrip{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    height:10px;
+    z-index:60;
+}
+.appheader{
+    max-height:0;
+    overflow:hidden;
+    background:#0f172a;
+    color:#e2e8f0;
+    flex-shrink:0;
+    position:relative;
+    z-index:55;
+    transition:max-height 200ms ease;
+}
+#hoverStrip:hover ~ .appheader,
+.appheader:hover,
+.appheader:focus-within{
+    max-height:3.5rem;
+}
+.appnav{
+    display:flex;
+    align-items:center;
+    gap:0.25rem;
+    height:3.5rem;
+    padding:0 1rem;
+}
+.appbrand{
+    font-size:18px;
+    font-weight:700;
+    color:#fff;
+    margin-right:0.5rem;
+}
+.appnav-item{
+    /* width/margin reset the global button{width:100%} so the tab hugs its text
+       and sits left in the flex nav instead of stretching the full bar. */
+    width:auto;
+    margin:0;
+    background:transparent;
+    border:none;
+    color:#cbd5e1;
+    padding:0.4rem 0.9rem;
+    border-radius:0.5rem;
+    font-size:0.875rem;
+    cursor:pointer;
+    transition:background-color 120ms ease, color 120ms ease;
+}
+.appnav-item:hover{
+    background:rgba(255,255,255,0.08);
+    color:#fff;
+}
+.appnav-item.active{
+    background:#1e293b;
+    color:#fff;
+    font-weight:600;
+}
+/* Top-level views swapped by the app-shell tabs (tabs.js). One is visible at a
+   time; the rest carry .view-hidden. .view-fading drives the cross-fade. */
+.view{
+    transition:opacity 150ms ease;
+}
+.view.view-hidden{
+    display:none;
+}
+.view-fading{
+    opacity:0;
+}
+
+/* ----- Automations view ----- */
+.view-automations{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    overflow:auto;
+    padding:24px;
+}
+.auto-bar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:18px;
+}
+.auto-title{
+    margin:0;
+}
+.auto-new-btn{
+    width:auto;
+    margin:0;
+    padding:8px 14px;
+}
+.auto-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+    gap:16px;
+    align-content:start;
+}
+.auto-empty{
+    grid-column:1 / -1;
+    color:#9ca3af;
+    text-align:center;
+    margin-top:24px;
+}
+/* A card is greyed (idle) until its periodic run is toggled on; then its colour
+   (set per automation) paints the text and border only, and the cycle spins. */
+.auto-card{
+    --auto-color:#3b82f6;
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-height:120px;
+    padding:16px;
+    background:#fff;
+    border:2px solid #d1d5db;
+    border-radius:12px;
+    color:#9ca3af;
+    box-shadow:0 2px 8px rgba(0,0,0,0.06);
+    transition:border-color .2s ease, color .2s ease;
+}
+.auto-card.running{
+    border-color:var(--auto-color);
+    color:var(--auto-color);
+}
+.auto-card-main{
+    cursor:pointer;
+    flex:1;
+}
+.auto-card-head{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding-right:72px;   /* clear the action buttons in the corner */
+}
+.auto-card-cycle{
+    display:none;
+    font-size:16px;
+    color:currentColor;
+}
+.auto-card.running .auto-card-cycle{
+    display:inline-block;
+    animation:auto-spin 2s linear infinite;
+}
+@keyframes auto-spin{
+    to{ transform:rotate(360deg); }
+}
+.auto-card-name{
+    margin:0;
+    font-size:17px;
+    color:inherit;           /* greyed, or the card colour when running */
+    overflow-wrap:anywhere;
+}
+.auto-card-info{
+    max-height:0;
+    opacity:0;
+    overflow:hidden;
+    font-size:12px;
+    transition:max-height .2s ease, opacity .2s ease;
+}
+.auto-card:hover .auto-card-info{
+    max-height:160px;
+    opacity:1;
+}
+.auto-info-line{
+    color:#6b7280;           /* always readable, independent of the card colour */
+    margin-top:4px;
+    overflow-wrap:anywhere;
+}
+.auto-info-label{
+    color:#9ca3af;
+}
+.auto-card-actions{
+    position:absolute;
+    top:12px;
+    right:12px;
+    display:flex;
+    gap:6px;
+}
+.auto-card-actions button{
+    width:auto;
+    margin:0;
+    padding:4px 9px;
+    background:#f3f4f6;
+    color:#374151;
+    border-radius:6px;
+    font-size:15px;
+    line-height:1;
+}
+.auto-card-actions button:hover{
+    background:#e5e7eb;
+}
+.auto-card-actions button:disabled{
+    opacity:.5;
+    cursor:default;
+}
+.auto-card.running .auto-toggle{
+    background:var(--auto-color);
+    color:#fff;
+}
+
+/* ----- Automation builder modal ----- */
+.auto-modal{
+    max-width:480px;
+    width:90%;
+}
+.auto-form label{
+    display:block;
+    font-weight:bold;
+    font-size:13px;
+    margin:12px 0 4px;
+}
+.auto-form-hint{
+    font-size:11px;
+    color:#9ca3af;
+    margin-bottom:4px;
+    font-weight:normal;
+}
+.auto-form input[type=color]{
+    width:48px;
+    height:34px;
+    padding:2px;
+}
+.auto-interval{
+    display:flex;
+    gap:8px;
+    align-items:center;
+}
+.auto-interval input[type=number]{
+    width:90px;
+    margin:0;
+}
+.auto-interval select,
+.auto-form select{
+    width:auto;
+    padding:8px;
+}
+.auto-steps{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.auto-step{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin:0;
+    font-weight:normal;
+    font-size:14px;
+}
+.auto-step input[type=checkbox]{
+    width:auto;
+    margin:0;
+}
+.auto-modal-actions{
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+}
+.auto-save-btn{
+    width:auto;
+    margin:0;
+}
+.auto-del-btn{
+    width:auto;
+    margin:0;
+    background:#ef4444;
 }
 .sidebar{
     width:320px;
@@ -542,4 +821,302 @@ input.drop-target{
 .modal-body{
     overflow:auto;
     padding:20px;
+}
+
+/* ----- Customer Management view ----- */
+/* Org cards take the top of the view; the contact directory is pinned to the
+   bottom 30% with its own scroll. */
+.view-customers{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+}
+.cust-top{
+    flex:1 1 auto;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    overflow:auto;
+    padding:24px;
+}
+.cust-bottom{
+    flex:0 0 30%;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    padding:12px 24px 16px;
+    border-top:1px solid #e5e7eb;
+    background:#fafafa;
+}
+.cust-hint{
+    margin:0 0 16px;
+    font-size:12px;
+    color:#6b7280;
+}
+.cust-section-title{
+    margin:0;
+    font-size:15px;
+    color:#374151;
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+.cust-back{
+    padding:4px 10px;
+    font-size:12px;
+}
+/* Org cards reuse the automation card shape, but are always coloured (there is no
+   running/idle state) — the accent paints the name, border, and chips. */
+.org-card{
+    --org-color:#3b82f6;
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-height:110px;
+    padding:16px;
+    background:#fff;
+    border:2px solid var(--org-color);
+    border-radius:12px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.06);
+    cursor:pointer;
+    transition:box-shadow .2s ease;
+}
+.org-card:hover{
+    box-shadow:0 4px 14px rgba(0,0,0,0.14);
+}
+/* Selected (its contacts are shown below) and a live drop target while dragging. */
+.org-card.selected{
+    box-shadow:0 0 0 3px var(--org-color);
+}
+.org-card.drag-over{
+    box-shadow:0 0 0 3px var(--org-color);
+    background:#f8fafc;
+}
+.org-card-actions{
+    position:absolute;
+    top:10px;
+    right:10px;
+}
+.org-edit{
+    width:auto;
+    margin:0;
+    padding:2px 8px;
+    font-size:13px;
+    background:#f3f4f6;
+    color:#374151;
+    border-radius:6px;
+    line-height:1.4;
+}
+.org-edit:hover{
+    background:#e5e7eb;
+}
+.org-card-head{
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    flex-wrap:wrap;
+    padding-right:34px;   /* clear the edit button in the corner */
+}
+.org-card-name{
+    margin:0;
+    font-size:17px;
+    color:var(--org-color);
+    overflow-wrap:anywhere;
+}
+.org-cat{
+    font-size:11px;
+    padding:1px 8px;
+    border-radius:999px;
+    background:#eef2ff;
+    color:#4338ca;
+    white-space:nowrap;
+}
+.org-chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    flex:1;
+}
+.domain-chip{
+    font-size:12px;
+    padding:2px 8px;
+    border-radius:6px;
+    overflow-wrap:anywhere;
+}
+.domain-chip.role-member{
+    background:#f3f4f6;
+    color:#374151;
+}
+/* Representative domains read differently from member domains at a glance. */
+.domain-chip.role-representative{
+    background:#fff7ed;
+    color:#9a3412;
+    border:1px dashed #fdba74;
+}
+.org-nodomains{
+    font-size:12px;
+    color:#9ca3af;
+    font-style:italic;
+}
+.org-card-foot{
+    font-size:12px;
+    color:#6b7280;
+}
+
+.cust-directory-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:10px;
+}
+.cust-count{
+    color:#9ca3af;
+    font-weight:normal;
+}
+.cust-search{
+    width:340px;
+    max-width:50%;
+    margin:0;
+    padding:8px 10px;
+}
+.cust-directory{
+    flex:1;
+    min-height:0;
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    overflow:auto;
+}
+.directory-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+}
+.directory-table th,
+.directory-table td{
+    text-align:left;
+    padding:8px 12px;
+    border-bottom:1px solid #f3f4f6;
+    vertical-align:top;
+}
+.directory-table th{
+    position:sticky;
+    top:0;
+    background:#f9fafb;
+    color:#6b7280;
+    font-size:12px;
+    z-index:1;
+}
+.contact-count,
+.contact-last{
+    color:#6b7280;
+    white-space:nowrap;
+}
+.directory-empty{
+    text-align:center;
+    color:#9ca3af;
+    padding:20px;
+}
+/* Draggable contact components: name / email / domain. */
+.contact-chip{
+    display:inline-block;
+    max-width:100%;
+    padding:2px 8px;
+    border-radius:6px;
+    font-size:12px;
+    cursor:grab;
+    overflow-wrap:anywhere;
+    border:1px solid transparent;
+}
+.contact-chip:active{
+    cursor:grabbing;
+}
+.chip-name{
+    background:#eef2ff;
+    color:#3730a3;
+}
+.chip-email{
+    background:#f3f4f6;
+    color:#374151;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chip-domain{
+    background:#ecfdf5;
+    color:#065f46;
+    border-color:#a7f3d0;
+}
+.contact-unpin{
+    width:auto;
+    margin:0;
+    padding:2px 7px;
+    font-size:12px;
+    line-height:1;
+    background:#fef2f2;
+    color:#b91c1c;
+    border-radius:6px;
+}
+.contact-unpin:hover{
+    background:#fee2e2;
+}
+.cust-dir-controls{
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+.cust-sort{
+    padding:6px 12px;
+    font-size:12px;
+    white-space:nowrap;
+}
+/* Role classifier badges. The representative badge is grey, matching the grey
+   row highlight that marks a representative. */
+.role-badge{
+    display:inline-block;
+    padding:1px 9px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:bold;
+}
+.role-member{
+    background:#e5e7eb;
+    color:#374151;
+}
+.role-rep{
+    background:#6b7280;
+    color:#fff;
+}
+.role-subtle{
+    display:block;
+    font-size:11px;
+    color:#6b7280;
+    margin-top:2px;
+}
+/* A representative row sits inside a grey bounding box to set it apart from the
+   org's own members. */
+.rep-row td{
+    background:#edeff2;
+    border-top:1px solid #cbd1d9;
+    border-bottom:1px solid #cbd1d9;
+}
+.rep-row td:first-child{
+    border-left:1px solid #cbd1d9;
+    border-top-left-radius:8px;
+    border-bottom-left-radius:8px;
+}
+.rep-row td:last-child{
+    border-right:1px solid #cbd1d9;
+    border-top-right-radius:8px;
+    border-bottom-right-radius:8px;
+}
+.org-domains{
+    width:100%;
+    min-height:64px;
+    resize:vertical;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:13px;
 }

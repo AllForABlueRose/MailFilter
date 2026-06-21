@@ -6,7 +6,20 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="container">
+<!-- Global app shell: an invisible
+     fixed strip at the very top edge reveals the header, which drops down and
+     grows the page's flex column, bumping the workspace below it. MailFilter is
+     the first view; future views become sibling .appnav-item buttons. -->
+<div id="hoverStrip" aria-hidden="true"></div>
+<header id="appHeader" class="appheader">
+  <nav class="appnav">
+    <span class="appbrand">✦</span>
+    <button type="button" class="appnav-item active" data-tab="mailfilter" aria-current="page">MailFilter</button>
+    <button type="button" class="appnav-item" data-tab="automations">Automations</button>
+    <button type="button" class="appnav-item" data-tab="customers">Customer Management</button>
+  </nav>
+</header>
+<div id="view-mailfilter" class="container view" data-view="mailfilter">
   <div class="sidebar">
     <h2>Mail Analyzer 2.0</h2>
 
@@ -155,6 +168,139 @@
   </div>
 </div>
 
+<section id="view-automations" class="view view-automations view-hidden" data-view="automations">
+  <div class="auto-bar">
+    <h2 class="auto-title">Automations</h2>
+    <button type="button" class="auto-new-btn" onclick="openAutomationBuilder()">+ New automation</button>
+  </div>
+  <div id="automationGrid" class="auto-grid">
+    <p class="auto-empty">No automations yet. Create one to chain a saved search with actions that run on a schedule.</p>
+  </div>
+</section>
+
+<div id="automationModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2 id="automationModalTitle">New Automation</h2>
+      <button class="icon-btn" onclick="closeAutomationBuilder()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      <label for="autoName">Name</label>
+      <input type="text" id="autoName" maxlength="80" placeholder="e.g. Invoice triage">
+
+      <label for="autoColor">Color <span class="auto-form-hint">(text &amp; border of the card)</span></label>
+      <input type="color" id="autoColor" value="#3b82f6">
+
+      <label>Run every</label>
+      <div class="auto-interval">
+        <input type="number" id="autoIntervalValue" min="1" value="1">
+        <select id="autoIntervalUnit">
+          <option value="60">minutes</option>
+          <option value="3600" selected>hours</option>
+          <option value="86400">days</option>
+        </select>
+      </div>
+
+      <label for="autoTemplate">Search criteria</label>
+      <select id="autoTemplate">
+        <option value="">— current MailFilter search —</option>
+      </select>
+      <div class="auto-form-hint">The automation runs this search, then the steps below on the matches.</div>
+
+      <label>Steps</label>
+      <div class="auto-steps">
+        <label class="auto-step"><input type="checkbox" id="autoStepMark" value="mark"> 🎯 Mark matched mail</label>
+        <label class="auto-step"><input type="checkbox" id="autoStepDownload" value="download"> ⬇ Download their attachments</label>
+        <label class="auto-step"><input type="checkbox" id="autoStepReport" value="report"> 📄 Export a CSV report</label>
+      </div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" id="autoDeleteBtn" class="auto-del-btn" onclick="deleteAutomationFromBuilder()" hidden>Delete</button>
+      <button type="button" class="auto-save-btn" onclick="saveAutomation()">Save</button>
+    </div>
+  </div>
+</div>
+
+<section id="view-customers" class="view view-customers view-hidden" data-view="customers">
+  <div class="cust-top">
+    <div class="auto-bar">
+      <h2 class="auto-title">Customer Management</h2>
+      <button type="button" class="auto-new-btn" onclick="openOrgBuilder()">+ New organization</button>
+    </div>
+    <p class="cust-hint">
+      Click an organization to see its contacts below. Drag a contact's
+      <b>name</b> or <b>email</b> onto an organization to pin them as a Representative;
+      drag a <b>domain</b> to make everyone on it a Member.
+    </p>
+    <div id="orgGrid" class="auto-grid cust-orgs">
+      <p class="auto-empty">No organizations yet. Create one, then drag contacts or a domain onto it.</p>
+    </div>
+  </div>
+
+  <div class="cust-bottom">
+    <div class="cust-directory-head">
+      <h3 class="cust-section-title">
+        <button type="button" id="directoryBackBtn" class="flip-btn cust-back" onclick="clearOrgSelection()" hidden>← Unassigned</button>
+        <span id="directoryScope">Unassigned contacts</span>
+        <span id="directoryCount" class="cust-count">(0)</span>
+      </h3>
+      <div class="cust-dir-controls">
+        <button type="button" id="roleSortBtn" class="flip-btn cust-sort" onclick="toggleRoleSort()" hidden
+                title="Sort an organization's contacts by role">Members first</button>
+        <input type="text" id="directorySearch" class="cust-search"
+               placeholder="Filter by name, email, or domain"
+               oninput="renderDirectory()">
+      </div>
+    </div>
+    <div class="cust-directory">
+      <table class="directory-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email address</th>
+            <th>Domain</th>
+            <th>Role</th>
+            <th>Mails</th>
+            <th>Last seen</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="directoryRows"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div id="organizationModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2 id="orgModalTitle">New Organization</h2>
+      <button class="icon-btn" onclick="closeOrgBuilder()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      <label for="orgName">Name</label>
+      <input type="text" id="orgName" maxlength="120" placeholder="e.g. Acme Corp">
+
+      <label for="orgColor">Color <span class="auto-form-hint">(card &amp; badge accent)</span></label>
+      <input type="color" id="orgColor" value="#3b82f6">
+
+      <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later)</span></label>
+      <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner">
+
+      <label for="orgMemberDomains">Member domains <span class="auto-form-hint">(one per line — the org's own staff)</span></label>
+      <textarea id="orgMemberDomains" class="org-domains" placeholder="acme.com&#10;acme.co.jp"></textarea>
+
+      <label for="orgRepDomains">Representative domains <span class="auto-form-hint">(one per line — 3rd parties fronting this org)</span></label>
+      <textarea id="orgRepDomains" class="org-domains" placeholder="repfirm.com"></textarea>
+      <div class="auto-form-hint">Individual people on other domains (e.g. a gmail rep) are pinned from the Contacts table.</div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" id="orgDeleteBtn" class="auto-del-btn" onclick="deleteOrganizationFromBuilder()" hidden>Delete</button>
+      <button type="button" class="auto-save-btn" onclick="saveOrganization()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="threadModal" class="modal-overlay" hidden>
   <div class="modal">
     <div class="modal-header">
@@ -175,6 +321,9 @@
 <script src="{{ url_for('static', filename='js/thread.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 <script src="{{ url_for('static', filename='js/regex.js') }}"></script>
+<script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/automations.js') }}"></script>
+<script src="{{ url_for('static', filename='js/customers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

@@ -30,10 +30,16 @@ class RouteTests(unittest.TestCase):
         self._orig_settings = config.SETTINGS_FILE
         self._orig_tags = config.TAGS_FILE
         self._orig_templates = config.TEMPLATES_DIR
+        self._orig_automations = config.AUTOMATIONS_FILE
+        self._orig_customers = config.CUSTOMERS_FILE
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
         config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
         config.TAGS_FILE = Path(self._tmpdir) / "tags.json"
         config.TEMPLATES_DIR = Path(self._tmpdir) / "search_templates"
+        # Isolate the list-backed stores too, so the suite never reads or writes
+        # the real automations/customers caches in the project root.
+        config.AUTOMATIONS_FILE = Path(self._tmpdir) / "automations.json"
+        config.CUSTOMERS_FILE = Path(self._tmpdir) / "customers.json"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -47,6 +53,8 @@ class RouteTests(unittest.TestCase):
         config.SETTINGS_FILE = self._orig_settings
         config.TAGS_FILE = self._orig_tags
         config.TEMPLATES_DIR = self._orig_templates
+        config.AUTOMATIONS_FILE = self._orig_automations
+        config.CUSTOMERS_FILE = self._orig_customers
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -343,6 +351,105 @@ class RouteTests(unittest.TestCase):
             "/api/templates/import", data={}, content_type="multipart/form-data"
         )
         self.assertEqual(resp.status_code, 400)
+
+    # ----- customer management -----
+
+    def test_organizations_empty_initially(self):
+        self.assertEqual(self.client.get("/api/organizations").get_json()["organizations"], [])
+
+    def test_create_organization_is_empty_by_default(self):
+        org = self.client.post("/api/organizations", json={"name": "Acme"}).get_json()
+        self.assertEqual(org["name"], "Acme")
+        self.assertEqual(org["domains"], [])
+        self.assertEqual(org["contacts"], [])
+        self.assertEqual(org["category"], "")
+
+    def test_create_organization_rejects_non_object(self):
+        self.assertEqual(self.client.post("/api/organizations", json=[1]).status_code, 400)
+
+    def test_update_unknown_organization_is_404(self):
+        resp = self.client.put("/api/organizations/nope", json={"name": "X"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_organization(self):
+        oid = self.client.post("/api/organizations", json={"name": "Gone"}).get_json()["id"]
+        data = self.client.delete(f"/api/organizations/{oid}").get_json()
+        self.assertEqual(data["organizations"], [])
+
+    def test_contacts_directory_aggregates_seeded_mail(self):
+        # The two seeded mails are both from alice@example.com (make_mail default).
+        contacts = self.client.get("/api/contacts").get_json()["contacts"]
+        alice = next(c for c in contacts if c["email"] == "alice@example.com")
+        self.assertEqual(alice["count"], 2)
+        self.assertIsNone(alice["member_org_id"])
+        self.assertIsNone(alice["rep_org_id"])
+
+    def test_domain_mapping_resolves_member(self):
+        oid = self.client.post("/api/organizations", json={"name": "Example"}).get_json()["id"]
+        self.client.put(f"/api/organizations/{oid}", json={
+            "category": "Customer",
+            "domains": [{"domain": "example.com", "role": "member"}],
+        })
+        contacts = {c["email"]: c for c in self.client.get("/api/contacts").get_json()["contacts"]}
+        self.assertEqual(contacts["alice@example.com"]["member_org_id"], oid)
+        self.assertEqual(contacts["alice@example.com"]["member_category"], "Customer")
+        self.assertIsNone(contacts["alice@example.com"]["rep_org_id"])
+
+    def test_representative_pin_coexists_with_member_base(self):
+        # acme owns example.com (members); beta pins alice as a representative.
+        # Both axes resolve: alice is a Member of acme AND a Representative of beta.
+        acme = self.client.post("/api/organizations", json={"name": "Acme"}).get_json()["id"]
+        self.client.post(f"/api/organizations/{acme}/domains",
+                         json={"domain": "example.com", "role": "member"})
+        beta = self.client.post("/api/organizations", json={"name": "Beta"}).get_json()["id"]
+        resp = self.client.post("/api/contacts/assign",
+                                json={"email": "alice@example.com", "org_id": beta, "role": "representative"})
+        self.assertEqual(resp.status_code, 200)
+        contacts = {c["email"]: c for c in self.client.get("/api/contacts").get_json()["contacts"]}
+        self.assertEqual(contacts["alice@example.com"]["member_org_id"], acme)
+        self.assertEqual(contacts["alice@example.com"]["rep_org_id"], beta)
+        self.assertTrue(contacts["alice@example.com"]["rep_pinned"])
+
+    def test_assign_representative_requires_base(self):
+        # No base membership for alice yet -> representative assignment is rejected.
+        oid = self.client.post("/api/organizations", json={"name": "Beta"}).get_json()["id"]
+        resp = self.client.post("/api/contacts/assign",
+                                json={"email": "alice@example.com", "org_id": oid, "role": "representative"})
+        self.assertEqual(resp.status_code, 409)
+
+    def test_assign_unknown_org_is_404(self):
+        resp = self.client.post("/api/contacts/assign",
+                                json={"email": "x@y.com", "org_id": "nope", "role": "member"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unassign_clears_pin(self):
+        oid = self.client.post("/api/organizations", json={"name": "Acme"}).get_json()["id"]
+        self.client.post("/api/contacts/assign",
+                         json={"email": "alice@example.com", "org_id": oid, "role": "member"})
+        self.client.post("/api/contacts/unassign", json={"email": "alice@example.com"})
+        contacts = {c["email"]: c for c in self.client.get("/api/contacts").get_json()["contacts"]}
+        self.assertIsNone(contacts["alice@example.com"]["member_org_id"])
+        self.assertIsNone(contacts["alice@example.com"]["rep_org_id"])
+
+    def test_assign_rejects_non_object(self):
+        self.assertEqual(self.client.post("/api/contacts/assign", json=[1]).status_code, 400)
+
+    def test_add_domain_makes_everyone_a_member(self):
+        # Dragging the example.com domain onto an org maps both seeded senders.
+        oid = self.client.post("/api/organizations", json={"name": "Example"}).get_json()["id"]
+        org = self.client.post(f"/api/organizations/{oid}/domains",
+                               json={"domain": "example.com", "role": "member"}).get_json()
+        self.assertEqual(org["domains"], [{"domain": "example.com", "role": "member"}])
+        contacts = {c["email"]: c for c in self.client.get("/api/contacts").get_json()["contacts"]}
+        self.assertEqual(contacts["alice@example.com"]["member_org_id"], oid)
+
+    def test_add_domain_unknown_org_is_404(self):
+        resp = self.client.post("/api/organizations/nope/domains", json={"domain": "x.com"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_add_domain_rejects_non_object(self):
+        oid = self.client.post("/api/organizations", json={"name": "A"}).get_json()["id"]
+        self.assertEqual(self.client.post(f"/api/organizations/{oid}/domains", json=[1]).status_code, 400)
 
 
 if __name__ == "__main__":

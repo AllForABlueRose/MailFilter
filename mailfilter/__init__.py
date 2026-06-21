@@ -3,19 +3,25 @@
 Dependency direction:
     routes -> filters/presenter -> store
     routes -> settings_store, tag_store, template_store
+    routes -> customers, customer_store
     template_store -> settings_store (schema), imgcodec (PNG files), util
+    customers -> (nothing app-level: pure, orgs passed in)
+    customer_store -> persistence -> crypto
     scheduler -> outlook -> store
     bootstrap -> outlook -> store
-    store, settings_store, tag_store -> crypto  (cache protection at rest)
+    store, settings_store, tag_store, customer_store -> crypto  (protection at rest)
 Only outlook.py and crypto.py import pywin32 (both lazily); store.py,
-settings_store.py, tag_store.py and template_store.py own mutable state.
+settings_store.py, tag_store.py, template_store.py and customer_store.py own
+mutable state.
 """
 
 from flask import Flask
 
 import config
 
-from . import bootstrap, outlook
+from . import automation, bootstrap, outlook
+from .automation_store import AutomationStore
+from .customer_store import CustomerStore
 from .routes import create_blueprint
 from .scheduler import RefreshScheduler
 from .settings_store import SettingsStore
@@ -43,7 +49,15 @@ def create_app():
     templates = TemplateStore(config.TEMPLATES_DIR)
     templates.load()
 
-    app.register_blueprint(create_blueprint(store, settings, tags, templates))
+    automations = AutomationStore(config.AUTOMATIONS_FILE)
+    automations.load()
+
+    customers = CustomerStore(config.CUSTOMERS_FILE)
+    customers.load()
+
+    app.register_blueprint(
+        create_blueprint(store, settings, tags, templates, automations, customers)
+    )
 
     # Exposed for the entry point and for tests.
     #   mail_initializer() — background Outlook bring-up + initial fetch. On a
@@ -56,10 +70,18 @@ def create_app():
     app.extensions["settings_store"] = settings
     app.extensions["tag_store"] = tags
     app.extensions["template_store"] = templates
+    app.extensions["automation_store"] = automations
+    app.extensions["customer_store"] = customers
     app.extensions["mail_initializer"] = lambda: _start_initializer(store)
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,
         lambda: outlook.refresh(store),
+    )
+    # Ticks every AUTOMATION_TICK_SECONDS and runs each enabled automation whose
+    # interval has elapsed. Like mail_scheduler, the entry point owns start().
+    app.extensions["automation_scheduler"] = RefreshScheduler(
+        config.AUTOMATION_TICK_SECONDS,
+        lambda: automation.run_due_automations(automations, store, tags),
     )
     return app
 

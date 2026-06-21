@@ -31,4 +31,6 @@ if __name__ == "__main__":
     # cached mail. The periodic scheduler then keeps it up to date.
     app.extensions["mail_initializer"]()
     app.extensions["mail_scheduler"].start()
+    # Periodic automation runner (enabled automations whose interval has elapsed).
+    app.extensions["automation_scheduler"].start()
     app.run(host=config.HOST, port=config.PORT, debug=False)

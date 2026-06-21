@@ -31,6 +31,14 @@ TEMPLATES_DIR = BASE_DIR / "search_templates"
 # attachment downloads remain streamed lazily from Outlook and are never
 # persisted (see outlook.fetch_attachment).
 WORKSPACE_DIR = BASE_DIR / "workspace"
+# User-defined automations (saved-search workflows that run periodically). Same
+# encoded-at-rest JSON format as the other stores (see mailfilter/automation_store.py).
+AUTOMATIONS_FILE = BASE_DIR / "automations_cache.json"
+# Customer Management: user-defined organizations (name, formality category,
+# member/representative domains, per-contact overrides). Same encoded-at-rest JSON
+# format as the other stores (see mailfilter/customer_store.py). The contact
+# directory itself is derived live from the mail cache, never persisted.
+CUSTOMERS_FILE = BASE_DIR / "customers_cache.json"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Outlook
@@ -39,6 +47,28 @@ OUTLOOK_INBOX_FOLDER = 6  # olFolderInbox
 # Behaviour
 REFRESH_INTERVAL_SECONDS = 3600
 PREVIEW_CHARS = 800
+
+# Automations. STEPS is the canonical set of action steps an automation can run
+# on its matched mail, in execution order (see mailfilter/automation.py). The
+# scheduler wakes every TICK and runs each enabled automation whose interval has
+# elapsed since its last run; per-automation intervals are clamped to MIN.
+AUTOMATION_STEPS = ("mark", "download", "report")
+AUTOMATION_TICK_SECONDS = 30
+AUTOMATION_MIN_INTERVAL_SECONDS = 60
+AUTOMATION_DEFAULT_INTERVAL_SECONDS = 3600
+
+# Customer Management. A domain/contact is tied to an organization with one of
+# these roles: "member" (normal staff on the org's own domain) or "representative"
+# (a 3rd party, or someone on a foreign domain, fronting the org). Resolution
+# treats both as belonging to the org; the role is recorded for the future
+# reply-formality engine (see mailfilter/customers.py, mailfilter/customer_store.py).
+ORG_DOMAIN_ROLES = ("member", "representative")
+# Per-string caps so a buggy/hostile client can't grow the customers cache without
+# bound (org name, formality category, a single domain, a single email).
+ORG_NAME_MAX = 120
+ORG_CATEGORY_MAX = 60
+ORG_DOMAIN_MAX = 255
+ORG_EMAIL_MAX = 320
 
 # Incremental fetch lookback. The fetch scans the inbox newest-first and stops
 # once it drops this far below the newest message already cached. A bare

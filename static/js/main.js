@@ -2,19 +2,26 @@
 // Loaded last, after every function/global the others define.
 
 async function init(){
-    // Close the thread popup on a backdrop click or Escape.
+    // Wire the app-shell header tabs (view switching).
+    initTabs();
+
+    // Close the thread / automation popups on a backdrop click or Escape.
     document.getElementById('threadModal').addEventListener('click', e => {
         if(e.target.id === 'threadModal'){ closeThread(); }
     });
+    document.getElementById('automationModal').addEventListener('click', e => {
+        if(e.target.id === 'automationModal'){ closeAutomationBuilder(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); return; }
+        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); return; }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
-        // and don't search while the thread popup is open.
+        // and don't search while a popup is open.
         const tag = e.target.tagName;
         if(tag === 'BUTTON' || tag === 'A' || tag === 'TEXTAREA') return;
         if(!document.getElementById('threadModal').hidden) return;
+        if(!document.getElementById('automationModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });
