@@ -153,6 +153,32 @@ def _org_info(prefix, org):
     }
 
 
+def resolve(email, orgs):
+    """Resolve a single ``email`` to its base-membership and representative orgs.
+
+    The single-address analog of :func:`build_directory`'s per-contact resolution
+    (override > domain, first-wins), so Bulk Compose can branch a reply template on
+    who the sender is without rebuilding the whole directory. Returns
+    ``{member_org_name, member_category, rep_org_name, role}`` -- empty strings
+    when unresolved; ``role`` is "representative" if a rep mapping exists, else
+    "member" if a base membership exists, else "".
+    """
+    blank = {"member_org_name": "", "member_category": "", "rep_org_name": "", "role": ""}
+    email = _normalize_email(email)
+    if not email:
+        return blank
+    maps = _resolution_maps(orgs)
+    domain = _domain_of(email)
+    member_org = maps["member_email"].get(email) or maps["member_domain"].get(domain)
+    rep_org = maps["rep_email"].get(email) or maps["rep_domain"].get(domain)
+    return {
+        "member_org_name": member_org.get("name", "") if member_org else "",
+        "member_category": member_org.get("category", "") if member_org else "",
+        "rep_org_name": rep_org.get("name", "") if rep_org else "",
+        "role": "representative" if rep_org else ("member" if member_org else ""),
+    }
+
+
 def build_directory(mails, orgs):
     """Aggregate contacts from ``mails`` and resolve each on both axes.
 

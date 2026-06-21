@@ -91,6 +91,60 @@ FETCH_LOOKBACK = timedelta(days=7)
 # between progress granularity and that overhead.
 FETCH_BATCH_SIZE = 200
 
+# Bulk Compose. The app's only mailbox-WRITING feature: it turns an Excel sheet
+# into reply DRAFTS in a shared mailbox (ReplyAll, from the shared address, with
+# the shared address CC'd) for a human to review and send. It never sends mail.
+# While BULK_MOCK_MODE is on, the shared-mailbox read and the draft creation are
+# served by in-process mocks (no Outlook/pywin32 needed) so the whole pipeline is
+# exercisable off the production machine. Flip it off there once verified.
+BULK_MOCK_MODE = True
+# The shared mailbox replies are drafted from (SentOnBehalfOf) and always CC'd to.
+SHARED_MAILBOX_ADDRESS = "shared.services@example.com"
+# Root of the file server the appended files are read from. Every resolved
+# attachment path is confined to this directory (no traversal escapes it).
+FILE_SERVER_DIR = BASE_DIR / "mock" / "fileserver"
+# Base for the ftp_link() template function: ftp_link("x.pdf") -> this + "x.pdf".
+FTP_LINK_BASE = "ftp://ftp.example.com/outgoing/"
+# Domains treated as "internal" for sender.is_internal in templates. Lowercased.
+INTERNAL_DOMAINS = ("example.com",)
+# Mock backends used while BULK_MOCK_MODE is on. The shared inbox is a JSON list
+# of mails shaped like the cache (id/subject/sender/sender_email/received/
+# recipient_emails/cc_emails); created drafts are written here as one JSON each
+# instead of Outlook's Drafts folder, so a run is inspectable.
+MOCK_SHARED_INBOX_FILE = BASE_DIR / "mock" / "shared_inbox.json"
+MOCK_DRAFTS_DIR = BASE_DIR / "mock" / "drafts"
+# Named reply templates (master body text + the attachment-filename expression).
+# Same encoded-at-rest JSON format as the other stores (see compose_template_store.py).
+COMPOSE_TEMPLATES_FILE = BASE_DIR / "compose_templates_cache.json"
+COMPOSE_TEMPLATE_NAME_MAX = 80
+COMPOSE_TEMPLATE_BODY_MAX = 20000
+COMPOSE_TEMPLATE_EXPR_MAX = 500
+# Ingest cap: rows beyond this in an uploaded sheet are dropped (reported).
+BULK_MAX_ROWS = 1000
+# Newest-first cap on how many shared-mailbox messages a preview reads to match
+# rows against (keeps a preview bounded on a large shared inbox).
+BULK_SHARED_READ_LIMIT = 1000
+# A row's datetime may differ from the matched mail's ReceivedTime by up to this
+# many seconds and still match (clock/format slack between the sheet and Outlook).
+BULK_MATCH_DATETIME_TOLERANCE_SECONDS = 60
+# Spreadsheet header -> canonical row field, for the fields Bulk Compose reasons
+# about (matching + attachment/FTP choice). Matching is case-insensitive on the
+# trimmed header. EVERY column is still exposed to the DSL by its normalized
+# header; these aliases just give the known ones stable names (row.file_name etc.).
+BULK_COLUMNS = {
+    "subject": "subject",
+    "datetime": "datetime",
+    "date": "datetime",
+    "received": "datetime",
+    "sender": "sender",
+    "from": "sender",
+    "file name": "file_name",
+    "filename": "file_name",
+    "file": "file_name",
+    "ftp": "uses_ftp",
+    "uses ftp": "uses_ftp",
+}
+
 # Server
 HOST = "127.0.0.1"
 PORT = 8080

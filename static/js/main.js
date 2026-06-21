@@ -12,8 +12,11 @@ async function init(){
     document.getElementById('automationModal').addEventListener('click', e => {
         if(e.target.id === 'automationModal'){ closeAutomationBuilder(); }
     });
+    document.getElementById('bulkTemplateModal').addEventListener('click', e => {
+        if(e.target.id === 'bulkTemplateModal'){ closeBulkTemplateEditor(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); return; }
+        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); return; }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
@@ -22,6 +25,7 @@ async function init(){
         if(tag === 'BUTTON' || tag === 'A' || tag === 'TEXTAREA') return;
         if(!document.getElementById('threadModal').hidden) return;
         if(!document.getElementById('automationModal').hidden) return;
+        if(!document.getElementById('bulkTemplateModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });

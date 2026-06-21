@@ -17,6 +17,7 @@
     <button type="button" class="appnav-item active" data-tab="mailfilter" aria-current="page">MailFilter</button>
     <button type="button" class="appnav-item" data-tab="automations">Automations</button>
     <button type="button" class="appnav-item" data-tab="customers">Customer Management</button>
+    <button type="button" class="appnav-item" data-tab="bulk">Bulk Compose</button>
   </nav>
 </header>
 <div id="view-mailfilter" class="container view" data-view="mailfilter">
@@ -304,6 +305,99 @@
   </div>
 </div>
 
+<section id="view-bulk" class="view view-bulk view-hidden" data-view="bulk">
+  <div class="auto-bar">
+    <h2 class="auto-title">Bulk Compose</h2>
+    <span id="bulkSharedInfo" class="bulk-shared"></span>
+  </div>
+  <p class="cust-hint">
+    Upload an Excel (.xlsx) sheet of replies. Each row is matched to a mail in the
+    shared mailbox (by subject + datetime + sender) and turned into a
+    <b>reply-all draft</b> sent from the shared mailbox and CC'ing it. Drafts are
+    created for your review — <b>nothing is ever sent</b>.
+  </p>
+
+  <div class="bulk-controls">
+    <div class="bulk-tmpl-row">
+      <label for="bulkTemplateSelect">Reply template</label>
+      <select id="bulkTemplateSelect" onchange="onBulkTemplateChange()">
+        <option value="">— select a template —</option>
+      </select>
+      <button type="button" class="flip-btn" id="bulkTmplEditBtn"
+              onclick="openBulkTemplateEditor(false)" disabled>✎ Edit</button>
+      <button type="button" class="flip-btn" onclick="openBulkTemplateEditor(true)">+ New</button>
+    </div>
+    <div id="bulkTemplateError" class="bulk-tmpl-error" hidden></div>
+
+    <div class="bulk-file-row">
+      <input type="file" id="bulkFile" accept=".xlsx" onchange="onBulkFileChange()">
+      <button type="button" class="auto-new-btn" id="bulkPreviewBtn"
+              onclick="bulkPreview()" disabled>Preview</button>
+      <button type="button" class="auto-save-btn" id="bulkCreateBtn"
+              onclick="bulkCreateDrafts()" disabled>Create drafts</button>
+    </div>
+    <div id="bulkSummary" class="bulk-summary"></div>
+    <div id="bulkStatus" class="tray-status"></div>
+  </div>
+
+  <div class="bulk-table-wrap">
+    <table class="directory-table bulk-table">
+      <thead>
+        <tr>
+          <th><input type="checkbox" id="bulkSelectAll" onclick="toggleBulkSelectAll()"></th>
+          <th>Row</th>
+          <th>Status</th>
+          <th>Recipients</th>
+          <th>Subject</th>
+          <th>Attachment / FTP</th>
+          <th>Body &amp; warnings</th>
+        </tr>
+      </thead>
+      <tbody id="bulkRows">
+        <tr><td colspan="7" class="bulk-empty">Pick a template and a spreadsheet, then Preview.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div id="bulkTemplateModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2 id="bulkTmplTitle">New Reply Template</h2>
+      <button class="icon-btn" onclick="closeBulkTemplateEditor()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      {% raw %}
+      <label for="bulkTmplName">Name</label>
+      <input type="text" id="bulkTmplName" maxlength="80" placeholder="e.g. Standard reply">
+
+      <label for="bulkTmplBody">Body</label>
+      <div class="auto-form-hint">
+        <code>{{ ... }}</code> inserts a value; <code>{% if ... %}…{% else %}…{% endif %}</code>
+        picks conditional text. Variables: <code>row.*</code> (your columns, e.g.
+        <code>row.file_name</code>), <code>sender.first_name</code>,
+        <code>sender.is_internal</code>, <code>sender.org</code>, <code>mail.subject</code>.
+        Functions: <code>if</code>, <code>default</code>, <code>upper</code>,
+        <code>ftp_link</code>, <code>date</code>.
+      </div>
+      <textarea id="bulkTmplBody" class="org-domains bulk-body"
+                placeholder="Dear {{ default(sender.first_name, &quot;Sir/Madam&quot;) }},&#10;&#10;{% if row.uses_ftp %}Download it here: {{ ftp_link(row.file_name) }}&#10;{% else %}Please find {{ row.file_name }} attached.&#10;{% endif %}&#10;{{ if(sender.is_internal, &quot;Best regards,&quot;, &quot;Yours faithfully,&quot;) }}"></textarea>
+
+      <label for="bulkTmplAttach">Attachment file name
+        <span class="auto-form-hint">(expression; blank = use the row's File Name column)</span></label>
+      <input type="text" id="bulkTmplAttach" maxlength="500"
+             placeholder='e.g. upper(row.ref) + &quot;.pdf&quot;'>
+      <div id="bulkTmplFormError" class="bulk-tmpl-error" hidden></div>
+      {% endraw %}
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" id="bulkTmplDeleteBtn" class="auto-del-btn"
+              onclick="deleteBulkTemplate()" hidden>Delete</button>
+      <button type="button" class="auto-save-btn" onclick="saveBulkTemplate()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="threadModal" class="modal-overlay" hidden>
   <div class="modal">
     <div class="modal-header">
@@ -327,6 +421,7 @@
 <script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/automations.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bulkcompose.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

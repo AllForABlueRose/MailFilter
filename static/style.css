@@ -1158,3 +1158,119 @@ input.drop-target{
     font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size:13px;
 }
+
+/* ----- Bulk Compose view ----- */
+.view-bulk{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    overflow:auto;
+    padding:24px;
+}
+.bulk-shared{
+    font-size:12px;
+    color:#6b7280;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bulk-shared.bulk-mock{
+    color:#b45309;
+    font-weight:600;
+}
+.bulk-controls{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    margin:12px 0 16px;
+}
+.bulk-tmpl-row,
+.bulk-file-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+}
+.bulk-tmpl-row label{
+    margin:0;
+    font-weight:600;
+}
+.bulk-tmpl-row select{
+    min-width:220px;
+}
+.bulk-file-row .auto-new-btn,
+.bulk-file-row .auto-save-btn{
+    width:auto;
+    margin:0;
+    padding:8px 14px;
+}
+.bulk-summary{
+    font-size:13px;
+    color:#374151;
+    font-weight:600;
+}
+.bulk-tmpl-error{
+    font-size:12px;
+    color:#b91c1c;
+    background:#fef2f2;
+    border:1px solid #fecaca;
+    border-radius:6px;
+    padding:6px 10px;
+}
+.bulk-status-ok{ color:#047857; }
+.bulk-status-err{ color:#b91c1c; }
+.bulk-table-wrap{
+    flex:1;
+    min-height:0;
+    overflow:auto;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+}
+.bulk-table td{
+    font-size:12px;
+}
+.bulk-table .bulk-empty{
+    text-align:center;
+    color:#9ca3af;
+    padding:24px;
+}
+.bulk-table tr.bulk-blocked td{
+    background:#fcfcfd;
+    color:#6b7280;
+}
+.bulk-badge{
+    display:inline-block;
+    padding:1px 9px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:bold;
+}
+.bulk-badge-ready{
+    background:#d1fae5;
+    color:#065f46;
+}
+.bulk-badge-blocked{
+    background:#fee2e2;
+    color:#991b1b;
+}
+.bulk-warn{
+    color:#b45309;
+}
+.bulk-bodyprev{
+    margin:0 0 4px;
+    max-width:380px;
+    max-height:120px;
+    overflow:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:11px;
+    color:#374151;
+    background:#f9fafb;
+    border:1px solid #f3f4f6;
+    border-radius:6px;
+    padding:6px 8px;
+}
+.bulk-body{
+    min-height:160px;
+}

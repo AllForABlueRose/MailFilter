@@ -21,6 +21,7 @@ import config
 
 from . import automation, bootstrap, outlook
 from .automation_store import AutomationStore
+from .compose_template_store import ComposeTemplateStore
 from .customer_store import CustomerStore
 from .routes import create_blueprint
 from .scheduler import RefreshScheduler
@@ -55,8 +56,12 @@ def create_app():
     customers = CustomerStore(config.CUSTOMERS_FILE)
     customers.load()
 
+    compose_templates = ComposeTemplateStore(config.COMPOSE_TEMPLATES_FILE)
+    compose_templates.load()
+
     app.register_blueprint(
-        create_blueprint(store, settings, tags, templates, automations, customers)
+        create_blueprint(store, settings, tags, templates, automations, customers,
+                         compose_templates)
     )
 
     # Exposed for the entry point and for tests.
@@ -72,6 +77,7 @@ def create_app():
     app.extensions["template_store"] = templates
     app.extensions["automation_store"] = automations
     app.extensions["customer_store"] = customers
+    app.extensions["compose_template_store"] = compose_templates
     app.extensions["mail_initializer"] = lambda: _start_initializer(store)
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,

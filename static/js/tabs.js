@@ -10,6 +10,7 @@ const TAB_TITLES = {
     mailfilter: "Mail Analyzer 2.0",
     automations: "Automations",
     customers: "Customer Management",
+    bulk: "Bulk Compose",
 };
 
 function setActiveTab(name){
@@ -31,6 +32,10 @@ function onTabEntered(name){
     // whole mail cache) — deliberately not on the 30s mail poll.
     if(name === "customers" && typeof loadCustomers === "function"){
         loadCustomers();
+    }
+    // Refresh the reply-template list (and shared-mailbox banner) on entry.
+    if(name === "bulk" && typeof loadComposeTemplates === "function"){
+        loadComposeTemplates();
     }
 }
 

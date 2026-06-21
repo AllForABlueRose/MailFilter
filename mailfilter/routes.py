@@ -1,7 +1,11 @@
 """HTTP layer: thin routes that delegate to store / filters / presenter."""
 
+import csv
+import io
+import json
 import logging
 import threading
+from datetime import datetime
 from io import BytesIO
 
 from flask import (
@@ -13,7 +17,19 @@ from flask import (
     send_file,
 )
 
-from . import automation, customers, outlook, util, workspace_ops
+import config
+
+from . import (
+    automation,
+    bulk_compose,
+    customers,
+    draft_ops,
+    outlook,
+    shared_mailbox,
+    spreadsheet,
+    util,
+    workspace_ops,
+)
 from .filters import MailQuery, filter_mails
 from .presenter import to_view_model
 
@@ -21,7 +37,7 @@ log = logging.getLogger(__name__)
 
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
-                     customer_store):
+                     customer_store, compose_template_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -323,4 +339,132 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             abort(400, description="expected a JSON object")
         return jsonify({"removed": customer_store.unassign(data.get("email"))})
 
+    # ----- Bulk Compose (reply-draft generation) -----
+
+    @bp.get("/api/compose-templates")
+    def list_compose_templates():
+        return jsonify({"templates": compose_template_store.snapshot(),
+                        "shared_mailbox": config.SHARED_MAILBOX_ADDRESS,
+                        "mock_mode": config.BULK_MOCK_MODE})
+
+    @bp.post("/api/compose-templates")
+    def create_compose_template():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(compose_template_store.create(data))
+
+    @bp.put("/api/compose-templates/<tid>")
+    def update_compose_template(tid):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        updated = compose_template_store.update(tid, data)
+        if updated is None:
+            abort(404)
+        return jsonify(updated)
+
+    @bp.delete("/api/compose-templates/<tid>")
+    def delete_compose_template(tid):
+        compose_template_store.delete(tid)
+        return jsonify({"templates": compose_template_store.snapshot()})
+
+    def _plan_from_request():
+        """Shared by preview and commit: parse the uploaded sheet, load the chosen
+        template, read the shared inbox, and plan every row. Aborts (4xx/5xx) on a
+        bad upload / unknown template / unreachable Outlook. Returns
+        ``(rows, plan_result, dropped)``."""
+        upload = request.files.get("file")
+        if upload is None:
+            abort(400, description="no spreadsheet uploaded")
+        template = compose_template_store.get(request.form.get("template_id"))
+        if template is None:
+            abort(400, description="unknown or missing template")
+        try:
+            _headers, rows, dropped = spreadsheet.parse_xlsx(upload.read())
+        except spreadsheet.SpreadsheetError as e:
+            abort(400, description=str(e))
+        try:
+            shared = shared_mailbox.read_inbox()
+        except outlook.OutlookUnavailableError as e:
+            abort(503, description=str(e))
+        orgs = customer_store.snapshot()
+        result = bulk_compose.plan_all(rows, shared, template, orgs)
+        return rows, result, dropped
+
+    @bp.post("/api/bulk/preview")
+    def bulk_preview():
+        """Dry-run: generate planned drafts from the sheet and return them.
+
+        Multipart form: ``file`` (the .xlsx) + ``template_id``. Writes NOTHING --
+        no drafts, no audit log. The response drives the review table."""
+        _rows, result, dropped = _plan_from_request()
+        return jsonify({**result, "dropped": dropped})
+
+    @bp.post("/api/bulk/create-drafts")
+    def bulk_create_drafts():
+        """Commit: recompute plans server-side and create the selected drafts.
+
+        Multipart form: ``file`` + ``template_id`` + optional ``indices`` (a JSON
+        array of row indices to include; absent = every ready row). Plans are
+        recomputed here rather than trusted from the client, so the server alone
+        decides what is created. Draft-only -- never sends. Writes a CSV audit log
+        of what was created to the dated workspace folder."""
+        _rows, result, _dropped = _plan_from_request()
+
+        selected = _selected_indices(request.form.get("indices"))
+        to_create = [p for p in result["plans"]
+                     if p["status"] == "ready"
+                     and (selected is None or p["row_index"] in selected)]
+
+        results = draft_ops.create_drafts(to_create)
+        audit = _write_bulk_audit(to_create, results)
+        created = sum(1 for r in results if r["status"] == "created")
+        return jsonify({"results": results, "created": created,
+                        "requested": len(to_create), "audit": audit})
+
     return bp
+
+
+def _selected_indices(raw):
+    """Parse the optional ``indices`` form field into a set, or None for 'all'."""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(value, list):
+        return None
+    return {int(i) for i in value if isinstance(i, (int, float))}
+
+
+def _write_bulk_audit(plans, results):
+    """Write a CSV record of a commit into the dated workspace folder.
+
+    Columns: row, status, subject, to, cc, attachment/ftp, detail. Returns the
+    file path, or "" if there was nothing to record."""
+    if not plans:
+        return ""
+    by_index = {p["row_index"]: p for p in plans}
+    now = datetime.now()
+    folder = config.WORKSPACE_DIR / now.strftime("%Y-%m-%d")
+    folder.mkdir(parents=True, exist_ok=True)
+    target = workspace_ops.unique_path(
+        folder, f"bulk_drafts_{now.strftime('%Y-%m-%d_%H%M%S')}.csv", 0)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["row", "status", "subject", "to", "cc", "attachment/ftp", "detail"])
+    for r in results:
+        p = by_index.get(r["row_index"], {})
+        att = p.get("ftp_link") if p.get("uses_ftp") else (
+            (p.get("attachment") or {}).get("name", ""))
+        writer.writerow([
+            r["row_index"], r["status"], p.get("subject", ""),
+            "; ".join(p.get("to", [])), "; ".join(p.get("cc", [])),
+            att or "", r.get("detail", ""),
+        ])
+    target.write_text(buf.getvalue(), encoding="utf-8-sig", newline="")
+    log.info("Bulk Compose: wrote audit log %s", target)
+    return str(target)
