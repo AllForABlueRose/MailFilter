@@ -86,18 +86,23 @@ function createOrgCard(o, counts){
     card.onclick = () => selectOrg(o.id);
     makeOrgDropTarget(card, o.id);
 
+    // The category reads as a label pinned to the card's top-right corner, tinted
+    // by its own colour (dotted border + dotted fill). Appended to the card (not
+    // the head) so it positions absolutely against the card box.
+    if(o.category){
+        const cat = document.createElement("span");
+        cat.className = "org-cat";
+        cat.style.setProperty("--cat-color", o.category_color || "#6366f1");
+        cat.textContent = o.category;
+        card.appendChild(cat);
+    }
+
     const head = document.createElement("div");
     head.className = "org-card-head";
     const name = document.createElement("h3");
     name.className = "org-card-name";
     name.textContent = o.name;
     head.appendChild(name);
-    if(o.category){
-        const cat = document.createElement("span");
-        cat.className = "org-cat";
-        cat.textContent = o.category;
-        head.appendChild(cat);
-    }
     card.appendChild(head);
 
     const chips = document.createElement("div");
@@ -398,6 +403,7 @@ function openOrgBuilder(id){
     document.getElementById("orgName").value = o ? o.name : "";
     document.getElementById("orgColor").value = o ? o.color : "#3b82f6";
     document.getElementById("orgCategory").value = o ? (o.category || "") : "";
+    document.getElementById("orgCategoryColor").value = o ? (o.category_color || "#6366f1") : "#6366f1";
     document.getElementById("orgMemberDomains").value = domainsForRole(o, "member");
     document.getElementById("orgRepDomains").value = domainsForRole(o, "representative");
 
@@ -432,6 +438,7 @@ async function saveOrganization(){
         name,
         color: document.getElementById("orgColor").value,
         category: document.getElementById("orgCategory").value.trim(),
+        category_color: document.getElementById("orgCategoryColor").value,
         domains: parseDomains("orgMemberDomains", "member")
             .concat(parseDomains("orgRepDomains", "representative")),
     };

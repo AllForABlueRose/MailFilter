@@ -3,7 +3,8 @@
 An organization groups the people the user corresponds with so replies can later
 be templated by formality (internal employee vs. customer — the motivating use
 case). Each org is a small dict: a name, a card colour, a free-text formality
-``category`` (empty by default — configured later), a set of ``domains`` and a set
+``category`` (empty by default — configured later) with its own ``category_color``
+label accent, a set of ``domains`` and a set
 of per-contact ``contacts`` overrides, each carrying a role from
 ``config.ORG_DOMAIN_ROLES`` ("member" or "representative").
 
@@ -27,7 +28,13 @@ from . import persistence
 log = logging.getLogger(__name__)
 
 DEFAULT_COLOR = "#3b82f6"
+DEFAULT_CATEGORY_COLOR = "#6366f1"
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _hex_color(value, fallback):
+    """Clamp to a ``#rrggbb`` string, falling back when missing/malformed."""
+    return value if isinstance(value, str) and _HEX_RE.match(value) else fallback
 
 
 def _clean(value, cap):
@@ -240,9 +247,10 @@ class CustomerStore:
             created = raw.get("created") or base.get("created") \
                 or datetime.now().strftime(config.RECEIVED_FORMAT)
 
-        color = raw.get("color", base.get("color", DEFAULT_COLOR))
-        if not (isinstance(color, str) and _HEX_RE.match(color)):
-            color = base.get("color", DEFAULT_COLOR)
+        color = _hex_color(raw.get("color", base.get("color")), base.get("color", DEFAULT_COLOR))
+        category_color = _hex_color(
+            raw.get("category_color", base.get("category_color")),
+            base.get("category_color", DEFAULT_CATEGORY_COLOR))
 
         name = _clean(raw.get("name", base.get("name", "")), config.ORG_NAME_MAX) or "Untitled"
         category = _clean(raw.get("category", base.get("category", "")), config.ORG_CATEGORY_MAX)
@@ -252,6 +260,7 @@ class CustomerStore:
             "name": name,
             "color": color,
             "category": category,
+            "category_color": category_color,
             "domains": _coerce_domains(raw.get("domains", base.get("domains", []))),
             "contacts": _coerce_contacts(raw.get("contacts", base.get("contacts", []))),
             "created": created,

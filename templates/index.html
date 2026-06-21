@@ -285,7 +285,10 @@
       <input type="color" id="orgColor" value="#3b82f6">
 
       <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later)</span></label>
-      <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner">
+      <div class="org-cat-field">
+        <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner">
+        <input type="color" id="orgCategoryColor" value="#6366f1" title="Category label color">
+      </div>
 
       <label for="orgMemberDomains">Member domains <span class="auto-form-hint">(one per line — the org's own staff)</span></label>
       <textarea id="orgMemberDomains" class="org-domains" placeholder="acme.com&#10;acme.co.jp"></textarea>

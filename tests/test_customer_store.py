@@ -17,10 +17,23 @@ class CoerceTests(unittest.TestCase):
         org = _store().create({"name": "Acme"})
         self.assertEqual(org["name"], "Acme")
         self.assertEqual(org["category"], "")
+        self.assertEqual(org["category_color"], "#6366f1")
         self.assertEqual(org["domains"], [])
         self.assertEqual(org["contacts"], [])
         self.assertTrue(org["id"])
         self.assertTrue(org["created"])
+
+    def test_category_color_kept_invalid_falls_back_and_preserved_on_update(self):
+        store = _store()
+        self.assertEqual(
+            store.create({"name": "A", "category_color": "#ff0000"})["category_color"],
+            "#ff0000")
+        self.assertEqual(
+            store.create({"name": "B", "category_color": "nope"})["category_color"],
+            "#6366f1")
+        org = store.create({"name": "C", "category_color": "#abcdef"})
+        # Omitted on update -> the stored colour is preserved, not reset.
+        self.assertEqual(store.update(org["id"], {"name": "C2"})["category_color"], "#abcdef")
 
     def test_blank_name_defaults_to_untitled(self):
         self.assertEqual(_store().create({"name": "   "})["name"], "Untitled")

@@ -276,6 +276,8 @@ body{
     display:flex;
     gap:10px;
     justify-content:flex-end;
+    padding:16px 20px;
+    border-top:1px solid #e5e7eb;
 }
 .auto-save-btn{
     width:auto;
@@ -896,10 +898,18 @@ input.drop-target{
     box-shadow:0 0 0 3px var(--org-color);
     background:#f8fafc;
 }
+/* Actions live in a bordered box pinned bottom-right, walled off from the card's
+   visual elements (the category label owns the top-right corner). */
 .org-card-actions{
     position:absolute;
-    top:10px;
+    bottom:10px;
     right:10px;
+    display:flex;
+    gap:6px;
+    padding:4px;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
 }
 .org-edit{
     width:auto;
@@ -919,7 +929,7 @@ input.drop-target{
     align-items:baseline;
     gap:8px;
     flex-wrap:wrap;
-    padding-right:34px;   /* clear the edit button in the corner */
+    padding-right:90px;   /* clear the category label in the corner */
 }
 .org-card-name{
     margin:0;
@@ -927,23 +937,50 @@ input.drop-target{
     color:var(--org-color);
     overflow-wrap:anywhere;
 }
+/* Category label: rounded pill pinned top-right, tinted by its own --cat-color
+   with a dotted border and a dotted (polka) fill over a light tint. */
 .org-cat{
+    --cat-color:#6366f1;
+    position:absolute;
+    top:10px;
+    right:10px;
+    max-width:48%;
     font-size:11px;
-    padding:1px 8px;
+    font-weight:600;
+    padding:2px 10px;
     border-radius:999px;
-    background:#eef2ff;
-    color:#4338ca;
+    border:1.5px dotted var(--cat-color);
+    color:color-mix(in srgb, var(--cat-color) 60%, #1f2937);
+    background-color:color-mix(in srgb, var(--cat-color) 14%, #fff);
+    background-image:radial-gradient(color-mix(in srgb, var(--cat-color) 45%, transparent) 1.4px, transparent 1.4px);
+    background-size:7px 7px;
     white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    z-index:1;
+}
+/* Builder: category text + its label colour share a row. */
+.org-cat-field{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.org-cat-field input[type=text]{
+    flex:1;
 }
 .org-chips{
     display:flex;
     flex-wrap:wrap;
-    gap:6px;
+    align-items:flex-start;     /* chips hug their content height, not the row */
+    align-content:flex-start;   /* wrapped rows pack at the top of the filled space */
+    gap:5px;
     flex:1;
 }
 .domain-chip{
-    font-size:12px;
-    padding:2px 8px;
+    font-size:11px;
+    line-height:1.5;
+    padding:0 7px;
+    border:1px solid transparent;   /* match the rep chip's border so heights align */
     border-radius:6px;
     overflow-wrap:anywhere;
 }
@@ -965,6 +1002,7 @@ input.drop-target{
 .org-card-foot{
     font-size:12px;
     color:#6b7280;
+    padding-right:54px;   /* clear the actions box pinned bottom-right */
 }
 
 .cust-directory-head{
