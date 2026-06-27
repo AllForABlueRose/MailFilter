@@ -248,6 +248,36 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(self.store.status_snapshot()["fetch_progress"], "")
 
 
+class PasswordScanTests(unittest.TestCase):
+    def setUp(self):
+        self.store = _temp_store()
+        self.store.add_mails([make_mail(id="A"), make_mail(id="B")])
+
+    def test_derived_defaults_before_any_scan(self):
+        m = self.store.snapshot()[0]
+        self.assertEqual(m["_passwords"], [])
+        self.assertFalse(m["_has_password"])
+
+    def test_apply_sets_counts_and_clears(self):
+        self.assertEqual(self.store.apply_password_scan({"A": ["hunter2"]}), 1)
+        by_id = {m["id"]: m for m in self.store.snapshot()}
+        self.assertEqual(by_id["A"]["_passwords"], ["hunter2"])
+        self.assertTrue(by_id["A"]["_has_password"])
+        self.assertFalse(by_id["B"]["_has_password"])
+        # A later scan that no longer matches A clears the flag.
+        self.assertEqual(self.store.apply_password_scan({}), 0)
+        self.assertFalse({m["id"]: m for m in self.store.snapshot()}["A"]["_has_password"])
+
+    def test_runtime_fields_are_not_persisted(self):
+        self.store.apply_password_scan({"A": ["hunter2"]})
+        self.store._save()
+        reloaded = MailStore(self.store._cache_file)
+        reloaded.load()
+        m = {x["id"]: x for x in reloaded.snapshot()}["A"]
+        self.assertEqual(m["_passwords"], [])      # re-derived default on load
+        self.assertFalse(m["_has_password"])
+
+
 def _temp_store():
     # Cache path inside a temp dir; the file need not exist yet.
     d = tempfile.mkdtemp()

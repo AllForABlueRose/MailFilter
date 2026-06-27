@@ -2,6 +2,7 @@
 
 import unittest
 
+import config
 from mailfilter import expr
 from mailfilter.presenter import _highlight, to_view_model
 from mailfilter.store import MailStore
@@ -112,6 +113,63 @@ class HighlightTests(unittest.TestCase):
         # "R&D" in source is escaped to "R&amp;D"; the literal must match it.
         out = _highlight("investing in R&amp;D", [], _terms("R&D"))
         self.assertIn('<span class="highlight">R&amp;D</span>', out)
+
+
+class PasswordFieldsTests(unittest.TestCase):
+    def test_defaults_when_no_scan(self):
+        vm = _view()
+        self.assertFalse(vm["has_password"])
+        self.assertEqual(vm["passwords"], [])
+
+    def test_reflects_scan_results(self):
+        mail = MailStore._with_derived(make_mail())
+        mail["is_thread"] = False
+        mail["_has_password"] = True
+        mail["_passwords"] = ["hunter2"]
+        vm = to_view_model(mail, None, None)
+        self.assertTrue(vm["has_password"])
+        self.assertEqual(vm["passwords"], ["hunter2"])
+
+
+class PasswordLocatorTests(unittest.TestCase):
+    def _preview(self, body, passwords):
+        mail = MailStore._with_derived(make_mail(body=body, attachments=[]))
+        mail["is_thread"] = False
+        mail["_passwords"] = passwords
+        return to_view_model(mail, None, None)["preview"]
+
+    def test_wraps_occurrence_with_index(self):
+        self.assertIn('<span class="pw-loc" data-pwloc="0">Hunter2xZ</span>',
+                      self._preview("Password: Hunter2xZ now", ["Hunter2xZ"]))
+
+    def test_wraps_every_occurrence(self):
+        self.assertEqual(self._preview("pw Secret9aa and Secret9aa", ["Secret9aa"])
+                         .count('data-pwloc="0"'), 2)
+
+    def test_distinct_index_per_password(self):
+        preview = self._preview("a Alpha9xx b Beta9yyy", ["Alpha9xx", "Beta9yyy"])
+        self.assertIn('data-pwloc="0">Alpha9xx', preview)
+        self.assertIn('data-pwloc="1">Beta9yyy', preview)
+
+    def test_special_chars_escaped_and_wrapped(self):
+        self.assertIn('<span class="pw-loc" data-pwloc="0">a&lt;b&gt;c1!</span>',
+                      self._preview("pwd: a<b>c1!", ["a<b>c1!"]))
+
+    def test_no_passwords_no_locator(self):
+        self.assertNotIn("pw-loc", self._preview("nothing to see", []))
+
+
+class PreviewCapTests(unittest.TestCase):
+    def test_capped_to_max_lines(self):
+        body = "\n".join(f"line{i}" for i in range(config.PREVIEW_MAX_LINES + 70))
+        # Excerpt keeps PREVIEW_MAX_LINES lines -> that many minus one <br> joins.
+        self.assertEqual(_view(body=body)["preview"].count("<br>"),
+                         config.PREVIEW_MAX_LINES - 1)
+
+    def test_capped_to_max_chars(self):
+        # A single very long line is bounded by the character cap.
+        self.assertEqual(len(_view(body="x" * (config.PREVIEW_CHARS * 3))["preview"]),
+                         config.PREVIEW_CHARS)
 
 
 if __name__ == "__main__":

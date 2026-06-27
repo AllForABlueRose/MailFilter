@@ -46,7 +46,12 @@ OUTLOOK_INBOX_FOLDER = 6  # olFolderInbox
 
 # Behaviour
 REFRESH_INTERVAL_SECONDS = 3600
-PREVIEW_CHARS = 800
+# Card body excerpt. The card shows the message body up to whichever limit it
+# hits first — PREVIEW_MAX_LINES lines or PREVIEW_CHARS characters — so a value
+# (e.g. a password) further down the body is still visible to eyeball. Password
+# DETECTION always scans the full cached body, never this excerpt.
+PREVIEW_CHARS = 4000
+PREVIEW_MAX_LINES = 50
 
 # Automations. STEPS is the canonical set of action steps an automation can run
 # on its matched mail, in execution order (see mailfilter/automation.py). The
@@ -144,6 +149,75 @@ BULK_COLUMNS = {
     "ftp": "uses_ftp",
     "uses ftp": "uses_ftp",
 }
+
+# Smart Password Detection. An on-demand, rules-based, regex scan of cached mail
+# bodies for plaintext passwords customers may have sent. No AI, no network —
+# only stdlib regex over the already-cached body. Settings (patterns + rules)
+# persist through the same encoded-at-rest seam as the other stores (see
+# mailfilter/password_settings_store.py, mailfilter/password_detect.py). The scan
+# is manual (a button); its results feed a sidebar filter + a per-card badge and
+# are never written to the mailbox. See docs/system-design.md §3.14.
+PASSWORD_SETTINGS_FILE = BASE_DIR / "password_settings_cache.json"
+# A detection pattern is authored as a COMPONENT, not a raw regex (see
+# password_detect.build_regex): the user writes the literal context they expect
+# and drops the placeholder token below where the password sits. The context is
+# treated as literal text whose whitespace/newlines compile to flexible "\s*", so
+# a marker and a value on separate lines still match. The placeholder becomes the
+# capturing group; its contents are an OPTIONAL per-pattern value regex (blank =
+# the generic value matcher below).
+PASSWORD_PLACEHOLDER = "<{(password_value)}>"
+# What an empty per-pattern "password pattern" means: a run of non-whitespace
+# (no spaces, tabs, or newlines). Shown in the UI as "*  (generic)".
+PASSWORD_GENERIC_VALUE_REGEX = r"\S+"
+# Seed components. Each is {template[, value_regex]}; the template carries exactly
+# one PASSWORD_PLACEHOLDER. Components are identified by their position (a 1-based
+# number), not a name. The last seed shows the layout cue: a line break in the
+# template means the value may be on a new line in the mail.
+PASSWORD_DEFAULT_PATTERNS = (
+    {"template": "password: <{(password_value)}>"},
+    {"template": "[password] <{(password_value)}>"},
+    {"template": "pwd: <{(password_value)}>"},
+    {"template": "password:\n<{(password_value)}>"},
+)
+# The six rules a candidate must satisfy to count as a password. The first four
+# are on/off toggles; the last two are length bounds set by sliders (inclusive).
+PASSWORD_RULE_DEFAULTS = {
+    "no_japanese": True,    # rule 1: reject candidates containing Japanese script
+    "no_link": True,        # rule 2: reject candidates that look like a URL
+    "no_repeating": True,   # rule 3: reject a single repeating unit (aaaa, abab, ----)
+    "no_file": True,        # rule 4: reject candidates that look like a filename
+    "min_length": 8,        # rule 5: reject candidates shorter than this
+    "max_length": 32,       # rule 6: reject candidates longer than this
+}
+# Slider bounds for the two length rules (the UI clamps to this range; so does
+# the store, so a hostile client can't push a nonsense bound).
+PASSWORD_LENGTH_FLOOR = 1
+PASSWORD_LENGTH_CEIL = 128
+# "Not a file" rule: a candidate ending in ".<one of these>" is treated as a
+# filename, not a password, and rejected. Lowercased; compared case-insensitively.
+PASSWORD_FILE_EXTENSIONS = (
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf",
+    "zip", "rar", "7z", "gz", "tar", "png", "jpg", "jpeg", "gif", "bmp", "svg",
+    "exe", "msi", "dmg", "json", "xml", "yml", "yaml", "html", "htm", "log",
+    "mp3", "wav", "mp4", "mov", "avi", "mkv",
+)
+# "Not repeating symbols" rule, part 1: reject a candidate that is one repeating
+# unit of period up to this many characters (period 1 = "aaaa"/"====", 2 =
+# "abab"/"=-=-", ...).
+PASSWORD_REPEAT_MAX_PERIOD = 2
+# "Not repeating symbols" rule, part 2 (the styling case): reject a candidate made
+# up ENTIRELY of non-alphanumeric symbols with at most this many distinct
+# characters — the dividers/rules customers paste as styling ("==============",
+# "----------", "==----==----", "=-~=-~"), regardless of their period. A varied
+# all-symbol string (more distinct chars, e.g. "!@#$%^&*") is left alone, as is
+# any candidate containing a letter or digit.
+PASSWORD_STYLING_MAX_DISTINCT = 3
+# Caps so a buggy/hostile client can't grow the settings file, or a single scan,
+# without bound.
+PASSWORD_TEMPLATE_MAX = 500       # the context box (literal text + placeholder)
+PASSWORD_VALUE_REGEX_MAX = 500    # the optional per-pattern value regex
+PASSWORD_MAX_PATTERNS = 50
+PASSWORD_MAX_MATCHES_PER_MAIL = 20
 
 # Server
 HOST = "127.0.0.1"

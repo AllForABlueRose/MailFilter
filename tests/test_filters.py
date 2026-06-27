@@ -52,11 +52,18 @@ class FromArgsTests(unittest.TestCase):
         for val in ("", "0", "off"):
             self.assertFalse(MailQuery.from_args({"resources": val}).resources_only)
 
+    def test_passwords_flag_variants(self):
+        for val in ("1", "true", "on"):
+            self.assertTrue(MailQuery.from_args({"passwords": val}).passwords_only)
+        for val in ("", "0", "off"):
+            self.assertFalse(MailQuery.from_args({"passwords": val}).passwords_only)
+
     def test_defaults_when_absent(self):
         q = MailQuery.from_args({})
         self.assertIsNone(q.main)
         self.assertIsNone(q.start)
         self.assertFalse(q.resources_only)
+        self.assertFalse(q.passwords_only)
         self.assertEqual(q.errors, ())
 
 
@@ -144,6 +151,13 @@ class FilterMailsTests(unittest.TestCase):
 
     def test_resources_only(self):
         self.assertEqual(self._ids({"resources": "1"}), ["a"])
+
+    def test_passwords_only(self):
+        # The flag keeps only mail flagged by the last scan (runtime _has_password),
+        # and composes with the other filters rather than replacing them.
+        self.mails[0]["_has_password"] = True
+        self.assertEqual(self._ids({"passwords": "1"}), ["a"])
+        self.assertEqual(self._ids({"passwords": "1", "sender": "carol"}), [])
 
     def test_date_range_inclusive(self):
         self.assertEqual(self._ids({"start": "2026-06-11T00:00"}), ["b"])

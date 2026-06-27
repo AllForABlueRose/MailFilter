@@ -487,6 +487,24 @@ body{
     background:#7dd3fc;
     font-weight:bold;
 }
+/* A detected password's location in the preview: inert until its chip is hovered,
+   then lit orange. */
+.pw-loc-active{
+    background:#fb923c;
+    border-radius:2px;
+    box-shadow:0 0 0 1px #f97316;
+}
+/* The password value chips (in the collapsed resources area): monospace, not the
+   blue link colour the other resource items use. */
+.pw-item{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#374151;
+    cursor:default;
+}
+.pw-item:hover{
+    text-decoration:none;
+    color:#c2410c;
+}
 button{
     width:100%;
     padding:12px;
@@ -1273,4 +1291,131 @@ input.drop-target{
 }
 .bulk-body{
     min-height:160px;
+}
+
+/* ----- Smart Password Detection ----- */
+/* Sidebar Scan / Settings row under the 🔑 toggle. */
+.pwd-bar{
+    display:flex;
+    gap:8px;
+    margin-bottom:10px;
+}
+.pwd-bar .flip-btn{
+    flex:1;
+}
+.pwd-scan-btn{
+    background:#2563eb;
+    color:white;
+}
+.pwd-scan-btn:hover{
+    background:#1d4ed8;
+}
+.pwd-status{
+    font-size:12px;
+    color:#6b7280;
+    margin-bottom:10px;
+    word-break:break-word;
+}
+.pwd-status:empty{
+    display:none;
+}
+/* The 🔑 badge on a card with a detected password (inherits .card-tag sizing). */
+.card-tag.password{
+    filter:none;
+}
+/* Modal: intro + editable pattern rows. */
+.pwd-intro{
+    font-weight:normal;
+    line-height:1.4;
+}
+.pwd-patterns{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+/* One component = a card: header row, context box, value-regex row. */
+.pwd-pattern-row{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    border:1px solid #d1d5db;
+    border-radius:8px;
+    padding:10px;
+    background:#fafafa;
+}
+.pwd-pattern-row input[type=text]{
+    margin:0;
+}
+.pwd-pattern-head{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.pwd-pattern-head .pwd-pattern-enabled{
+    width:auto;
+    margin:0;
+    flex:0 0 auto;
+}
+.pwd-pattern-num{
+    flex:0 0 auto;
+    font-weight:bold;
+    font-size:13px;
+    color:#374151;
+}
+.pwd-pattern-spacer{
+    flex:1;
+}
+.pwd-marker-btn{
+    flex:0 0 auto;
+    background:#e5e7eb;
+    color:#374151;
+    padding:8px 12px;
+    white-space:nowrap;
+}
+.pwd-pattern-del{
+    flex:0 0 auto;
+    background:#ef4444;
+    color:white;
+    padding:8px 12px;
+}
+.pwd-pattern-template{
+    width:100%;
+    margin:0;
+    box-sizing:border-box;
+    resize:vertical;
+    min-height:44px;
+    padding:8px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:13px;
+}
+.pwd-value-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.pwd-value-label{
+    flex:0 0 auto;
+    font-size:12px;
+    color:#6b7280;
+}
+.pwd-pattern-value{
+    flex:1;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:13px;
+}
+/* Greyed "*" generic hint when the value regex is left blank. */
+.pwd-pattern-value::placeholder{
+    color:#9ca3af;
+    font-style:italic;
+}
+.pwd-add-btn{
+    width:auto;
+    margin:8px 0 0;
+}
+.pwd-slider{
+    width:100%;
+}
+.pwd-slider-value{
+    font-weight:bold;
+    color:#2563eb;
 }

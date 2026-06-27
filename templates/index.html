@@ -97,6 +97,19 @@
              title="Don't show matching links (the mail still shows). Same operators.">
     </div>
 
+    <button type="button" id="passwordsToggle" class="toggle-btn"
+            aria-pressed="false" onclick="togglePasswords()"
+            title="Show only mail with a password detected in the last scan">
+      🔑 Has Password: Off
+    </button>
+    <div class="pwd-bar">
+      <button type="button" class="flip-btn pwd-scan-btn" onclick="runPasswordScan()"
+              title="Scan cached mail now for passwords, then refresh the list">🔍 Scan</button>
+      <button type="button" class="flip-btn" onclick="openPasswordSettings()"
+              title="Configure password-detection patterns and rules">⚙ Settings</button>
+    </div>
+    <div id="passwordScanStatus" class="pwd-status"></div>
+
     <div class="status-group">
       <div class="status-box">
         <b>Last Refresh</b>
@@ -398,6 +411,54 @@
   </div>
 </div>
 
+<div id="passwordModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2>Smart Password Detection</h2>
+      <button class="icon-btn" onclick="closePasswordSettings()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      <p class="auto-form-hint pwd-intro">
+        Each component below describes one place a password might appear. In the
+        context box, type the words you expect to see and drop a
+        <code>&lt;{(password_value)}&gt;</code> marker where the password sits.
+        A <b>line break in the box</b> means the password may be on the next line
+        in the email. Spacing is flexible. Leave <b>Password pattern</b> blank for
+        a generic match (any run of non-space characters), or set a regex to be
+        specific. Matching is case-insensitive. Scanning is manual — close this
+        and hit <b>🔍 Scan</b>.
+      </p>
+
+      <label>Detection components</label>
+      <div id="pwdPatternRows" class="pwd-patterns"></div>
+      <button type="button" class="flip-btn pwd-add-btn" onclick="addPasswordPattern()">+ Add component</button>
+
+      <label>Rules</label>
+      <div class="auto-steps">
+        <label class="auto-step"><input type="checkbox" id="pwdRuleJapanese"> 🇯🇵 Reject Japanese characters</label>
+        <label class="auto-step"><input type="checkbox" id="pwdRuleLink"> 🔗 Reject links</label>
+        <label class="auto-step"><input type="checkbox" id="pwdRuleRepeating"> 🔁 Reject repeating / styling symbols (====, ----, =-=-, aaaa)</label>
+        <label class="auto-step"><input type="checkbox" id="pwdRuleFile"> 📎 Reject file names (report.pdf)</label>
+      </div>
+
+      <label>Minimum length: <span id="pwdMinValue" class="pwd-slider-value">8</span></label>
+      <input type="range" id="pwdMinLength" class="pwd-slider"
+             oninput="document.getElementById('pwdMinValue').textContent = this.value">
+
+      <label>Maximum length: <span id="pwdMaxValue" class="pwd-slider-value">32</span></label>
+      <input type="range" id="pwdMaxLength" class="pwd-slider"
+             oninput="document.getElementById('pwdMaxValue').textContent = this.value">
+
+      <div id="pwdFormError" class="bulk-tmpl-error" hidden></div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" class="flip-btn" onclick="saveAndScanPasswords()"
+              title="Save these settings and run a scan now">Save &amp; Scan</button>
+      <button type="button" class="auto-save-btn" onclick="savePasswordSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="threadModal" class="modal-overlay" hidden>
   <div class="modal">
     <div class="modal-header">
@@ -422,6 +483,7 @@
 <script src="{{ url_for('static', filename='js/automations.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bulkcompose.js') }}"></script>
+<script src="{{ url_for('static', filename='js/passworddetect.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

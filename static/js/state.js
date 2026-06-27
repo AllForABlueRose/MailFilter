@@ -3,6 +3,8 @@
 // here. Loaded first; main.js (which calls init) is loaded last.
 
 let resourcesOnly = false;
+let passwordsOnly = false;       // sidebar "has a detected password" filter
+let passwordSettings = null;     // last loaded /api/password-settings (patterns + rules)
 
 let mailById = {};          // id -> view model from the last load (drag source)
 let trayMails = [];         // mails collected in the workspace

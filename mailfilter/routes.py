@@ -25,6 +25,7 @@ from . import (
     customers,
     draft_ops,
     outlook,
+    password_detect,
     shared_mailbox,
     spreadsheet,
     util,
@@ -37,7 +38,7 @@ log = logging.getLogger(__name__)
 
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
-                     customer_store, compose_template_store):
+                     customer_store, compose_template_store, password_settings):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -422,6 +423,46 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         created = sum(1 for r in results if r["status"] == "created")
         return jsonify({"results": results, "created": created,
                         "requested": len(to_create), "audit": audit})
+
+    # ----- Smart Password Detection -----
+
+    @bp.get("/api/password-settings")
+    def get_password_settings():
+        return jsonify(password_settings.snapshot())
+
+    @bp.post("/api/password-settings")
+    def save_password_settings():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(password_settings.update(data))
+
+    @bp.post("/api/passwords/scan")
+    def scan_passwords():
+        """Run the password detector over every cached mail and record the hits.
+
+        Reads-only: compiles the saved patterns, scans each mail's subject+body
+        (the full cached body, not the card excerpt), and stashes the per-mail
+        matches on the store for the badge + the ``passwords`` sidebar filter.
+        Nothing is written to disk or to the mailbox. Returns the scanned/flagged
+        counts and any patterns that failed to compile."""
+        snap = password_settings.snapshot()
+        compiled, errors = password_detect.compile_patterns(snap["patterns"])
+        rules = snap["rules"]
+        matches = {}
+        mails = store.snapshot()
+        for mail in mails:
+            text = "\n".join([mail.get("subject", ""), mail.get("body", "")])
+            found = password_detect.scan_text(
+                text, compiled, rules, config.PASSWORD_MAX_MATCHES_PER_MAIL)
+            if found:
+                matches[mail["id"]] = found
+        flagged = store.apply_password_scan(matches)
+        return jsonify({
+            "scanned": len(mails),
+            "flagged": flagged,
+            "pattern_errors": [{"component": n, "error": e} for n, e in errors],
+        })
 
     return bp
 

@@ -43,6 +43,7 @@ class MailQuery:
     attachment_blacklist: object = None
     links_blacklist: object = None
     resources_only: bool = False  # attachments and/or links
+    passwords_only: bool = False  # only mail with a detected password (last scan)
     errors: tuple = ()            # human-readable expression parse errors
 
     @classmethod
@@ -75,6 +76,7 @@ class MailQuery:
             attachment_blacklist=parse_field("attachment_blacklist"),
             links_blacklist=parse_field("links_blacklist"),
             resources_only=args.get("resources") in ("1", "true", "on"),
+            passwords_only=args.get("passwords") in ("1", "true", "on"),
             errors=tuple(errors),
         )
 
@@ -103,6 +105,8 @@ def filter_mails(mails, query):
         if query.resources_only and not (
             mail["_has_attachments"] or mail["_has_links"]
         ):
+            continue
+        if query.passwords_only and not mail.get("_has_password"):
             continue
         results.append(mail)
     return results

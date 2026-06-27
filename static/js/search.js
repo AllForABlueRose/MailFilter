@@ -31,8 +31,27 @@ function toggleResources(){
     loadMail();
 }
 
+function syncPasswordsButton(){
+    const btn = document.getElementById('passwordsToggle');
+    btn.classList.toggle('active', passwordsOnly);
+    btn.setAttribute('aria-pressed', String(passwordsOnly));
+    btn.textContent = `🔑 Has Password: ${passwordsOnly ? 'On' : 'Off'}`;
+}
+
+function togglePasswords(){
+    passwordsOnly = !passwordsOnly;
+    syncPasswordsButton();
+    saveSettings();
+    highlightActiveTemplate();
+    loadMail();
+}
+
+// `resources` and `passwords` are booleans handled via toggle buttons; the rest
+// are text fields mapped by SETTINGS_FIELDS.
+const SETTINGS_BOOLS = ['resources', 'passwords'];
+
 function currentSettings(){
-    const settings = {resources: resourcesOnly};
+    const settings = {resources: resourcesOnly, passwords: passwordsOnly};
     for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
         settings[key] = document.getElementById(id).value;
     }
@@ -66,6 +85,8 @@ function applySettings(settings){
     }
     resourcesOnly = !!settings.resources;
     syncResourcesButton();
+    passwordsOnly = !!settings.passwords;
+    syncPasswordsButton();
     // Reveal an exclude field if it carries a value.
     Object.keys(EXCLUDE_FIELDS).forEach(which => {
         setExcludeVisible(which, !!document.getElementById(EXCLUDE_FIELDS[which].field).value);
@@ -121,7 +142,7 @@ async function loadMail(){
     // list lives in exactly one place (SETTINGS_FIELDS).
     const params = new URLSearchParams();
     for(const [key, value] of Object.entries(currentSettings())){
-        params.set(key, key === 'resources' ? (value ? '1' : '') : value);
+        params.set(key, SETTINGS_BOOLS.includes(key) ? (value ? '1' : '') : value);
     }
     const response = await fetch(`/api/mail?${params}`);
     const data = await response.json();

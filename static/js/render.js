@@ -15,12 +15,25 @@ function createCard(mail){
     card.appendChild(buildMeta(mail));
 
     const preview = document.createElement('div');
-    preview.innerHTML = mail.preview;
+    preview.className = 'card-preview';
+    preview.innerHTML = mail.preview;   // pre-escaped; carries pw-loc locator spans
     card.appendChild(preview);
 
     const resources = renderResources(mail);
     if(resources){
         card.appendChild(resources);
+    }
+    // Detected passwords sit in the same collapsed bottom area as attachments and
+    // links: a group label that reveals the value chips on hover. Reuse the
+    // resources container if there already is one so there's a single divider.
+    if(mail.passwords && mail.passwords.length){
+        let container = resources;
+        if(!container){
+            container = document.createElement('div');
+            container.className = 'resources';
+            card.appendChild(container);
+        }
+        container.appendChild(renderPasswordGroup(mail, card));
     }
     // Top-right corner: tags marking actions performed on this mail (and, in the
     // tray, a remove button appended here too). `mail.tags` comes from the
@@ -31,8 +44,20 @@ function createCard(mail){
     if(tags.marked){ corner.appendChild(makeTag('🎯', 'Marked', tags.marked)); }
     if(tags.downloaded){ corner.appendChild(makeTag('📥', 'Attachments downloaded', tags.downloaded)); }
     if(tags.links){ corner.appendChild(makeTag('🌐', 'Links opened', tags.links)); }
+    // A detected password (from the last Smart Password Detection scan). The
+    // value itself lives in the resources area (renderPasswordGroup), not here.
+    if(mail.has_password){ corner.appendChild(makePasswordBadge()); }
     card.appendChild(corner);
     return card;
+}
+
+// The 🔑 badge shown on a card whose body contained a detected password.
+function makePasswordBadge(){
+    const badge = document.createElement('span');
+    badge.className = 'card-tag password';
+    badge.textContent = '🔑';
+    badge.title = 'Password detected';
+    return badge;
 }
 
 function makeTag(symbol, label, recency){
@@ -170,6 +195,32 @@ function makeLabel(text){
     label.className = 'resource-label';
     label.textContent = text;
     return label;
+}
+
+// The detected-password group: a collapsed "🔑 Passwords (N)" label whose value
+// chips appear on hover (same mechanism as attachments/links). Hovering a chip
+// lights up the matching occurrence(s) in this card's message preview in orange.
+function renderPasswordGroup(mail, card){
+    const group = document.createElement('div');
+    group.className = 'resource-group pw-group';
+    group.appendChild(makeLabel(`🔑 Passwords (${mail.passwords.length})`));
+    mail.passwords.forEach((pw, i) => {
+        const item = document.createElement('span');
+        item.className = 'resource-item pw-item';
+        item.textContent = pw;   // raw value, inserted as DOM text (never HTML)
+        item.title = 'Hover to locate it in the message';
+        item.addEventListener('mouseenter', () => togglePwLocation(card, i, true));
+        item.addEventListener('mouseleave', () => togglePwLocation(card, i, false));
+        group.appendChild(item);
+    });
+    return group;
+}
+
+// Toggle the orange locator on every occurrence of password `index` in this
+// card's preview (the server tagged them with class pw-loc + data-pwloc).
+function togglePwLocation(card, index, on){
+    card.querySelectorAll(`.pw-loc[data-pwloc="${index}"]`)
+        .forEach(el => el.classList.toggle('pw-loc-active', on));
 }
 
 // One glyph per broad file-type family, picked from the filename extension —

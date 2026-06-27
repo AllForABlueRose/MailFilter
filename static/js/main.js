@@ -15,8 +15,11 @@ async function init(){
     document.getElementById('bulkTemplateModal').addEventListener('click', e => {
         if(e.target.id === 'bulkTemplateModal'){ closeBulkTemplateEditor(); }
     });
+    document.getElementById('passwordModal').addEventListener('click', e => {
+        if(e.target.id === 'passwordModal'){ closePasswordSettings(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); return; }
+        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); return; }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
@@ -26,6 +29,7 @@ async function init(){
         if(!document.getElementById('threadModal').hidden) return;
         if(!document.getElementById('automationModal').hidden) return;
         if(!document.getElementById('bulkTemplateModal').hidden) return;
+        if(!document.getElementById('passwordModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });

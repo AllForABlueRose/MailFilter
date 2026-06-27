@@ -29,6 +29,7 @@ DEFAULTS = {
     "attachment_blacklist": "",
     "links_blacklist": "",
     "resources": False,
+    "passwords": False,
 }
 
 # Per-string cap so a buggy/hostile client can't grow the file without bound.

@@ -140,6 +140,12 @@ class MailStore:
                 mail.get("body", "").lower(),
             ]
         )
+        # Smart Password Detection results. Populated on demand by
+        # apply_password_scan() (the manual scan), not at ingest, so newly-fetched
+        # mail simply carries no detected password until the next scan. Like the
+        # other "_" fields they are stripped before the cache is written.
+        mail["_passwords"] = []
+        mail["_has_password"] = False
         return mail
 
     # ----- mutation -----
@@ -160,6 +166,29 @@ class MailStore:
                 self._sort()
                 self._save()
             return added
+
+    def apply_password_scan(self, matches_by_id):
+        """Record a password-detection scan's results onto the live mails.
+
+        ``matches_by_id`` maps a mail ``id`` to the list of detected password
+        strings for it (ids with no match may be omitted). Sets each mail's
+        runtime ``_passwords`` / ``_has_password`` fields under the lock, so a
+        concurrent ``/api/mail`` read sees a consistent set, and clears the flag
+        on mails absent from the map. Returns how many mails are now flagged.
+
+        These fields are derived (``_``-prefixed): they are never persisted, so a
+        scan does not touch the cache file. Re-run any time the patterns/rules
+        change to refresh them.
+        """
+        flagged = 0
+        with self._lock:
+            for mail in self._mails:
+                found = matches_by_id.get(mail["id"], [])
+                mail["_passwords"] = found
+                mail["_has_password"] = bool(found)
+                if found:
+                    flagged += 1
+        return flagged
 
     def _rebuild_threads(self):
         # Caller must hold the lock.

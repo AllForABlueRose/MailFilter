@@ -4,17 +4,30 @@ import html
 import re
 from urllib.parse import quote
 
-from config import PREVIEW_CHARS
+from config import PREVIEW_CHARS, PREVIEW_MAX_LINES
 
 from . import expr
+
+
+def _excerpt(body):
+    """The card body excerpt: the full body, capped at whichever limit it hits
+    first — PREVIEW_MAX_LINES lines or PREVIEW_CHARS characters. Generous enough
+    that a value further down the body (e.g. a detected password) is visible,
+    while still bounding a runaway message. Detection scans the full body, not
+    this."""
+    lines = body.split("\n")
+    if len(lines) > PREVIEW_MAX_LINES:
+        body = "\n".join(lines[:PREVIEW_MAX_LINES])
+    return body[:PREVIEW_CHARS]
 
 
 def to_view_model(mail, main_node, optional_node,
                   attachment_blacklist=None, links_blacklist=None):
     main_terms = expr.operands(main_node)
     optional_terms = expr.operands(optional_node)
-    preview = html.escape(mail.get("body", "")[:PREVIEW_CHARS])
+    preview = html.escape(_excerpt(mail.get("body", "")))
     preview = _highlight(preview, main_terms, optional_terms)
+    preview = _mark_passwords(preview, mail.get("_passwords", []))
     preview = preview.replace("\n", "<br>")
     return {
         "id": mail.get("id", ""),
@@ -33,7 +46,42 @@ def to_view_model(mail, main_node, optional_node,
         # Blacklisted attachments/links are dropped here (display + workspace).
         "attachments": _attachments(mail, main_terms, optional_terms, attachment_blacklist),
         "links": _links(mail, main_terms, optional_terms, links_blacklist),
+        # Smart Password Detection results from the last manual scan (empty until
+        # one runs). Raw candidate strings; the frontend inserts them as DOM text
+        # (a title tooltip), never HTML, like the people fields above.
+        "has_password": bool(mail.get("_has_password")),
+        "passwords": list(mail.get("_passwords", [])),
     }
+
+
+def _mark_passwords(html_text, passwords):
+    """Wrap each occurrence of a detected password in the (already escaped +
+    keyword-highlighted) preview with a ``pw-loc`` locator span the UI lights up
+    in orange when its chip is hovered.
+
+    Each span carries ``data-pwloc=<index into passwords>`` so a chip can find its
+    own occurrences. Passwords are matched as exact escaped literals; one that a
+    keyword highlight happened to split simply isn't wrapped (no locator for it),
+    which degrades gracefully. Runs after :func:`_highlight` so it never rewrites
+    that pass's markup.
+    """
+    if not passwords:
+        return html_text
+    index_by_escaped = {}
+    for i, pw in enumerate(passwords):
+        escaped = html.escape(pw)
+        if escaped and escaped not in index_by_escaped:
+            index_by_escaped[escaped] = i
+    if not index_by_escaped:
+        return html_text
+    # Longest first so a password isn't pre-empted by a shorter one nested in it.
+    alternation = "|".join(re.escape(e) for e in sorted(index_by_escaped, key=len, reverse=True))
+
+    def repl(match):
+        return (f'<span class="pw-loc" data-pwloc="{index_by_escaped[match.group(0)]}">'
+                f'{match.group(0)}</span>')
+
+    return re.compile(alternation).sub(repl, html_text)
 
 
 def _people(names, emails):

@@ -224,6 +224,8 @@ function openTrayLinks(){
 // pull every displayed mail with the shown label into the workspace. Each
 // (action, recency) pair is its own label, because a greyed (old >7 days) tag
 // reads as a distinct thing from its fresh counterpart.
+// Each label is either a (recency-specific) action tag, or — for the 🔑 password
+// badge, which is not a tag — a `match(mail)` predicate.
 const COLLECT_LABELS = [
     {action: 'marked',     recency: 'recent', symbol: '🎯', name: 'Marked'},
     {action: 'marked',     recency: 'old',    symbol: '🎯', name: 'Marked (7+ days)', grey: true},
@@ -231,16 +233,23 @@ const COLLECT_LABELS = [
     {action: 'downloaded', recency: 'old',    symbol: '📥', name: 'Downloaded (7+ days)', grey: true},
     {action: 'links',      recency: 'recent', symbol: '🌐', name: 'Links opened'},
     {action: 'links',      recency: 'old',    symbol: '🌐', name: 'Links opened (7+ days)', grey: true},
+    {name: 'Password detected', symbol: '🔑', match: m => !!m.has_password},
 ];
 
 let collectAvailable = [];  // labels present in the current display
 let collectIndex = 0;       // focused label within collectAvailable
 
+// Whether a mail carries a collect label: a predicate label uses its match();
+// an action label matches when the mail's tag has that exact recency.
+function labelMatches(mail, label){
+    if(label.match){ return label.match(mail); }
+    return !!(mail.tags && mail.tags[label.action] === label.recency);
+}
+
 // Only the labels at least one displayed mail actually carries.
 function labelsInDisplay(){
     const mails = Object.values(mailById);
-    return COLLECT_LABELS.filter(label =>
-        mails.some(m => m.tags && m.tags[label.action] === label.recency));
+    return COLLECT_LABELS.filter(label => mails.some(m => labelMatches(m, label)));
 }
 
 function openCollectWheel(){
@@ -293,7 +302,7 @@ function collectFocused(){
 function collectByLabel(label){
     let added = false;
     Object.values(mailById).forEach(m => {
-        if(m.tags && m.tags[label.action] === label.recency && !trayIds.has(m.id)){
+        if(labelMatches(m, label) && !trayIds.has(m.id)){
             trayIds.add(m.id);
             trayMails.push(m);
             added = true;
