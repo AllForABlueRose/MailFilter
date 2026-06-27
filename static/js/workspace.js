@@ -161,7 +161,8 @@ function downloadTrayAttachments(){
     fetch('/api/download', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({items}),
+        body: JSON.stringify({items, append_customer_name: appendCustomerName,
+                              resolve_customer_name: resolveCustomerName}),
     }).then(r => r.json()).then(result => {
         // Server persisted the "downloaded" tag; reflect it immediately.
         const ids = new Set((result.saved || []).map(s => s.id));

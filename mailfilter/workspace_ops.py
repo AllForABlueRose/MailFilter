@@ -16,7 +16,7 @@ from pathlib import Path
 
 import config
 
-from . import outlook, util
+from . import customers, outlook, util
 
 log = logging.getLogger(__name__)
 
@@ -32,16 +32,37 @@ def find_attachment(store, mail_id, index):
     return None
 
 
-def save_attachments(store, items):
+def save_attachments(store, items, append_org_name=False, orgs=None,
+                     resolve_customer=False, customer_names=None):
     """Save a batch of attachments into ``<WORKSPACE_DIR>/<YYYY-MM-DD>/``.
 
     ``items`` is ``[{"id": <mail id>, "index": <int>}, ...]``. Bytes are pulled
     from Outlook on demand, one at a time. Returns ``(folder, saved, errors)``;
     per-item failures are collected in ``errors`` rather than aborting the batch.
     The caller owns any tagging (the routes tag "downloaded"; so does the engine).
+
+    Two independent, experimental ways to append a ``_<name>`` suffix to a saved
+    file's stem (before the extension); both are off for the automation engine:
+
+    * ``append_org_name`` — "Append Customer Name To Downloads": the file's mail's
+      **sender** resolves to an organization in ``orgs`` (representative-of
+      preferred over base membership).
+    * ``resolve_customer`` — "Resolve Customer Name To Downloads": one of the
+      ``customer_names`` (a Suspected Customers List) appears in the mail's content.
+
+    The org suffix takes priority: a mail that resolves to an organization is
+    **skipped** by the customer-name matcher. A sender/mail that matches neither is
+    left unchanged.
     """
     folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
     folder.mkdir(parents=True, exist_ok=True)
+
+    org_by_id = _sender_org_names(store, items, orgs) if append_org_name else {}
+    # The customer-name matcher only runs for mails the org resolver didn't claim.
+    customer_by_id = (
+        _customer_name_matches(store, items, customer_names, skip=set(org_by_id))
+        if resolve_customer else {}
+    )
 
     saved, errors = [], []
     for item in items:
@@ -59,12 +80,75 @@ def save_attachments(store, items):
         except LookupError as e:
             errors.append(f"{mail_id}#{index}: {e}")
             continue
-        target = unique_path(folder, filename or att["filename"], index)
+        name = filename or att["filename"]
+        suffix = org_by_id.get(mail_id) or customer_by_id.get(mail_id)
+        if suffix:
+            name = append_stem(name, suffix)
+        target = unique_path(folder, name, index)
         target.write_bytes(blob)
         saved.append({"id": mail_id, "index": index, "name": target.name})
 
     log.info("Saved %d attachment(s) to %s (%d error(s))", len(saved), folder, len(errors))
     return str(folder), saved, errors
+
+
+def _sender_org_names(store, items, orgs):
+    """Map each item's mail id to its sender's organization name, or absent.
+
+    Resolves the sender on both axes (``customers.resolve``) and prefers the
+    representative-of org over the base membership. Built once per batch so each
+    mail resolves a single time regardless of how many attachments it has.
+    """
+    wanted = {(item or {}).get("id") for item in items}
+    by_id = {m["id"]: m for m in store.snapshot()}
+    names = {}
+    for mail_id in wanted:
+        mail = by_id.get(mail_id)
+        if mail is None:
+            continue
+        res = customers.resolve(mail.get("sender_email", ""), orgs or [])
+        name = res["rep_org_name"] or res["member_org_name"]
+        if name:
+            names[mail_id] = name
+    return names
+
+
+def _customer_name_matches(store, items, names, skip=None):
+    """Map each item's mail id to the first Suspected Customers List name found.
+
+    For every wanted mail (except those in ``skip`` — already claimed by the org
+    resolver), scan the mail's content (subject + body, case-insensitively) and
+    return the **first** name from ``names`` (in list order) that appears, as the
+    user typed it. Mails with no match are absent.
+    """
+    cleaned = [n.strip() for n in (names or []) if n and n.strip()]
+    if not cleaned:
+        return {}
+    skip = skip or set()
+    wanted = {(item or {}).get("id") for item in items} - skip
+    by_id = {m["id"]: m for m in store.snapshot()}
+    matches = {}
+    for mail_id in wanted:
+        mail = by_id.get(mail_id)
+        if mail is None:
+            continue
+        content = (mail.get("subject", "") + "\n" + mail.get("body", "")).lower()
+        for name in cleaned:
+            if name.lower() in content:
+                matches[mail_id] = name
+                break
+    return matches
+
+
+def append_stem(filename, suffix):
+    """Append ``_<suffix>`` to ``filename``'s stem, keeping the extension.
+
+    ``report.pdf`` + ``Acme Corp`` -> ``report_Acme Corp.pdf``. The result is
+    sanitized later by :func:`unique_path`, so an org name with path-unsafe
+    characters can't escape the folder.
+    """
+    p = Path(filename)
+    return f"{p.stem}_{suffix}{p.suffix}"
 
 
 def write_report(store, ids):

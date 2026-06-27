@@ -29,6 +29,9 @@ Node shapes returned by :func:`parse`:
 """
 
 import re
+import unicodedata
+
+from config import SEARCH_NORMALIZE_FORM
 
 _RE_OPEN = "<{("
 _RE_CLOSE = ")}>"
@@ -68,6 +71,34 @@ def evaluate(node, text):
         rhs = evaluate(nxt, text)
         value = (value or rhs) if op == "OR" else (value and rhs)
     return value
+
+
+def fold_width(text):
+    """Fold full-width (全角) and half-width (半角) variants to one form.
+
+    NFKC-normalize ``text`` so a keyword on one width matches the other (e.g.
+    full-width ``ＡＢＣ１２３`` and ASCII ``abc123`` compare equal). Used by the
+    optional Normalize Search Character Width experimental filter; both the query
+    literals (via :func:`fold_node`) and the text under test must be folded with
+    this same function.
+    """
+    return unicodedata.normalize(SEARCH_NORMALIZE_FORM, text)
+
+
+def fold_node(node, fn):
+    """Return a copy of a parsed ``node`` with ``fn`` applied to each literal leaf.
+
+    Regex leaves are returned unchanged — folding a pattern could rewrite its
+    metacharacters — so width-insensitive matching covers literals only.
+    """
+    if node is None:
+        return None
+    kind = node[0]
+    if kind == "lit":
+        return ("lit", fn(node[1]))
+    if kind == "re":
+        return node
+    return ("seq", [fold_node(child, fn) for child in node[1]], node[2])
 
 
 def operands(node):

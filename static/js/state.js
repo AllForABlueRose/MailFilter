@@ -5,6 +5,12 @@
 let resourcesOnly = false;
 let passwordsOnly = false;       // sidebar "has a detected password" filter
 let passwordSettings = null;     // last loaded /api/password-settings (patterns + rules)
+let normalizeWidth = false;      // experimental: fold full-width<->half-width on keyword search
+let attachmentSearch = false;    // experimental: main/exclude keyword match also covers attachment names
+let linkSearch = false;          // experimental: main/exclude keyword match also covers link URLs
+let appendCustomerName = false;  // experimental: append sender's org name to batch-downloaded files
+let resolveCustomerName = false; // experimental: append a Suspected Customers List name found in mail content
+let experimentalEnabled = {};    // feature id -> bool, last loaded /api/experimental (which controls are mounted)
 
 let mailById = {};          // id -> view model from the last load (drag source)
 let trayMails = [];         // mails collected in the workspace

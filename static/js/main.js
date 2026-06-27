@@ -18,8 +18,14 @@ async function init(){
     document.getElementById('passwordModal').addEventListener('click', e => {
         if(e.target.id === 'passwordModal'){ closePasswordSettings(); }
     });
+    document.getElementById('experimentalModal').addEventListener('click', e => {
+        if(e.target.id === 'experimentalModal'){ closeExperimental(); }
+    });
+    document.getElementById('suspectedCustomersModal').addEventListener('click', e => {
+        if(e.target.id === 'suspectedCustomersModal'){ closeSuspectedCustomers(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); return; }
+        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); closeExperimental(); closeSuspectedCustomers(); return; }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
@@ -30,6 +36,8 @@ async function init(){
         if(!document.getElementById('automationModal').hidden) return;
         if(!document.getElementById('bulkTemplateModal').hidden) return;
         if(!document.getElementById('passwordModal').hidden) return;
+        if(!document.getElementById('experimentalModal').hidden) return;
+        if(!document.getElementById('suspectedCustomersModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });
@@ -124,6 +132,7 @@ async function init(){
 
     await restoreSettings();   // repopulate the sidebar from the saved search
     loadTemplates();           // populate the search-template dropdown
+    loadExperimental();        // mount enabled experimental-feature controls
     loadMail();
     setInterval(loadMail, 30000);
 }

@@ -3,6 +3,13 @@
 // Relies on globals from search.js (currentSettings, applySettings, saveSettings,
 // loadMail, SETTINGS_FIELDS) and templateBodies from state.js.
 
+// Fields a template deliberately doesn't carry (mirrors
+// settings_store.TEMPLATE_EXCLUDED_FIELDS): the date range and the width-
+// normalization toggle are per-session choices, so they're ignored when matching
+// the active template and re-applied from the live search after switching.
+const TEMPLATE_EXCLUDED_FIELDS = ['start', 'end', 'normalize_width',
+                                  'append_customer_name', 'resolve_customer_name'];
+
 // Fetch the template list and render the dropdown. Called once at startup.
 async function loadTemplates(){
     try{
@@ -41,6 +48,7 @@ function highlightActiveTemplate(){
 function settingsEqual(a, b){
     if(!!a.resources !== !!b.resources) return false;
     for(const key of Object.keys(SETTINGS_FIELDS)){
+        if(TEMPLATE_EXCLUDED_FIELDS.includes(key)) continue;  // not part of a template
         if((a[key] || '') !== (b[key] || '')) return false;
     }
     return true;
@@ -54,16 +62,32 @@ function syncTemplateButtons(){
 }
 
 // Switch to the chosen template: load its settings into the sidebar, make them
-// the live last-used search, and run it.
+// the live last-used search, and run it. The date range and normalize-width
+// toggle aren't part of a template, so the live values are kept across the switch.
 function switchTemplate(){
     const name = document.getElementById('templateSelect').value;
     syncTemplateButtons();
     if(!name) return;
     const settings = templateBodies[name];
     if(!settings) return;
+    const preserved = currentSettings();
     applySettings(settings);
+    applyPreservedTemplateFields(preserved);
     saveSettings();
     loadMail();
+}
+
+// Re-apply the excluded (per-session) fields after a template loaded its own. The
+// date range comes from the text inputs; normalize-width is a toggle global.
+function applyPreservedTemplateFields(preserved){
+    document.getElementById(SETTINGS_FIELDS.start).value = preserved.start || '';
+    document.getElementById(SETTINGS_FIELDS.end).value = preserved.end || '';
+    normalizeWidth = !!preserved.normalize_width;
+    syncNormalizeWidthButton();
+    appendCustomerName = !!preserved.append_customer_name;
+    syncAppendCustomerNameButton();
+    resolveCustomerName = !!preserved.resolve_customer_name;
+    syncResolveCustomerNameButton();
 }
 
 async function saveTemplate(){

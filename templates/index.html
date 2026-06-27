@@ -97,18 +97,78 @@
              title="Don't show matching links (the mail still shows). Same operators.">
     </div>
 
-    <button type="button" id="passwordsToggle" class="toggle-btn"
-            aria-pressed="false" onclick="togglePasswords()"
-            title="Show only mail with a password detected in the last scan">
-      🔑 Has Password: Off
-    </button>
-    <div class="pwd-bar">
-      <button type="button" class="flip-btn pwd-scan-btn" onclick="runPasswordScan()"
-              title="Scan cached mail now for passwords, then refresh the list">🔍 Scan</button>
-      <button type="button" class="flip-btn" onclick="openPasswordSettings()"
-              title="Configure password-detection patterns and rules">⚙ Settings</button>
+    <div class="experimental">
+      <button type="button" id="experimentalToggle" class="exp-header"
+              onclick="openExperimental()"
+              title="Enable or disable experimental features">
+        🧪 Experimental Features
+      </button>
+      <div id="experimentalActive" class="exp-active">
+        <div class="exp-empty" id="expEmpty">No features enabled. Click above to add some.</div>
+
+        <div class="exp-feature" data-feature="passwords" hidden>
+          <div class="exp-feature-name">🔑 Smart Password Detection</div>
+          <button type="button" id="passwordsToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="togglePasswords()"
+                  title="Show only mail with a password detected in the last scan">
+            🔑 Has Password: Off
+          </button>
+          <div class="pwd-bar">
+            <button type="button" class="flip-btn pwd-scan-btn" onclick="runPasswordScan()"
+                    title="Scan cached mail now for passwords, then refresh the list">🔍 Scan</button>
+            <button type="button" class="flip-btn" onclick="openPasswordSettings()"
+                    title="Configure password-detection patterns and rules">⚙ Settings</button>
+          </div>
+          <div id="passwordScanStatus" class="pwd-status"></div>
+        </div>
+
+        <div class="exp-feature" data-feature="normalize_width" hidden>
+          <div class="exp-feature-name">🔀 Normalize Search Character Width</div>
+          <button type="button" id="normalizeWidthToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleNormalizeWidth()"
+                  title="Fold full-width (全角) and half-width (半角) characters so a keyword search on one width also matches the other">
+            🔀 Normalize Width: Off
+          </button>
+        </div>
+
+        <div class="exp-feature" data-feature="attachment_search" hidden>
+          <div class="exp-feature-name">📎 Attachment Search Matching</div>
+          <button type="button" id="attachmentSearchToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleAttachmentSearch()"
+                  title="When on, the main/exclude keyword search also matches attachment filenames">
+            📎 Search Attachments: Off
+          </button>
+        </div>
+
+        <div class="exp-feature" data-feature="link_search" hidden>
+          <div class="exp-feature-name">🔗 Link Search Matching</div>
+          <button type="button" id="linkSearchToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleLinkSearch()"
+                  title="When on, the main/exclude keyword search also matches link URLs">
+            🔗 Search Links: Off
+          </button>
+        </div>
+
+        <div class="exp-feature" data-feature="append_customer_name" hidden>
+          <div class="exp-feature-name">🏢 Append Customer Name To Downloads</div>
+          <button type="button" id="appendCustomerNameToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleAppendCustomerName()"
+                  title="When on, 'Download every attachment' appends _<organization> to files whose sender belongs to (or represents) an organization">
+            🏢 Append Customer Name: Off
+          </button>
+        </div>
+
+        <div class="exp-feature" data-feature="resolve_customer_name" hidden>
+          <div class="exp-feature-name">🧩 Resolve Customer Name To Downloads</div>
+          <button type="button" id="resolveCustomerNameToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleResolveCustomerName()"
+                  title="When on, 'Download every attachment' appends a Suspected Customers List name found in the mail content (skipped when the sender already resolves to an organization)">
+            🧩 Resolve Customer Name: Off
+          </button>
+          <button type="button" class="exclude-toggle" onclick="openSuspectedCustomers()">Suspected Customers List</button>
+        </div>
+      </div>
     </div>
-    <div id="passwordScanStatus" class="pwd-status"></div>
 
     <div class="status-group">
       <div class="status-box">
@@ -459,6 +519,79 @@
   </div>
 </div>
 
+<div id="experimentalModal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Experimental Features</h2>
+      <button class="icon-btn" onclick="closeExperimental()" title="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="exp-help">
+        Toggle experimental features on or off. Checked features appear in the
+        <b>Experimental Features</b> box in the sidebar, where you can use them.
+        Unchecking one removes its control and turns it off.
+      </p>
+      <div id="expFeatureChecklist">
+        <label class="exp-check">
+          <input type="checkbox" data-feature="passwords">
+          <span class="exp-check-name">🔑 Smart Password Detection</span>
+          <span class="exp-check-desc">Scan cached mail for plaintext passwords; filter and badge the hits.</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="normalize_width">
+          <span class="exp-check-name">🔀 Normalize Search Character Width</span>
+          <span class="exp-check-desc">Fold full-width (全角) and half-width (半角) characters so a keyword search on one width matches the other.</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="attachment_search">
+          <span class="exp-check-name">📎 Attachment Search Matching</span>
+          <span class="exp-check-desc">Add a toggle for whether the main/exclude keyword search also matches attachment filenames.</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="link_search">
+          <span class="exp-check-name">🔗 Link Search Matching</span>
+          <span class="exp-check-desc">Add a toggle for whether the main/exclude keyword search also matches link URLs.</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="append_customer_name">
+          <span class="exp-check-name">🏢 Append Customer Name To Downloads</span>
+          <span class="exp-check-desc">When downloading every attachment, append the sender's organization name to each file (when the sender belongs to or represents one).</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="resolve_customer_name">
+          <span class="exp-check-name">🧩 Resolve Customer Name To Downloads</span>
+          <span class="exp-check-desc">When downloading every attachment, append a name from your Suspected Customers List if it appears in the mail content. Skipped for a mail already matched by Append Customer Name.</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" class="auto-save-btn" onclick="updateExperimental()">Update Settings</button>
+    </div>
+  </div>
+</div>
+
+<div id="suspectedCustomersModal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Suspected Customers List</h2>
+      <button class="icon-btn" onclick="closeSuspectedCustomers()" title="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="exp-help">
+        One customer name per line. When <b>Download every attachment</b> runs and a
+        name appears in a mail's content (subject or body), it's appended to that
+        mail's files — unless the sender already resolved to an organization via
+        <b>Append Customer Name To Downloads</b>.
+      </p>
+      <textarea id="suspectedCustomersText" class="suspected-customers-text" rows="12"
+                placeholder="Acme Corp&#10;Globex&#10;Initech"></textarea>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" class="auto-save-btn" onclick="saveSuspectedCustomers()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="threadModal" class="modal-overlay" hidden>
   <div class="modal">
     <div class="modal-header">
@@ -484,6 +617,8 @@
 <script src="{{ url_for('static', filename='js/customers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bulkcompose.js') }}"></script>
 <script src="{{ url_for('static', filename='js/passworddetect.js') }}"></script>
+<script src="{{ url_for('static', filename='js/customermatch.js') }}"></script>
+<script src="{{ url_for('static', filename='js/experimental.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

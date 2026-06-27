@@ -58,12 +58,29 @@ class FromArgsTests(unittest.TestCase):
         for val in ("", "0", "off"):
             self.assertFalse(MailQuery.from_args({"passwords": val}).passwords_only)
 
+    def test_normalize_width_flag_variants(self):
+        for val in ("1", "true", "on"):
+            self.assertTrue(MailQuery.from_args({"normalize_width": val}).normalize_width)
+        for val in ("", "0", "off"):
+            self.assertFalse(MailQuery.from_args({"normalize_width": val}).normalize_width)
+
+    def test_attachment_and_link_search_flag_variants(self):
+        for val in ("1", "true", "on"):
+            self.assertTrue(MailQuery.from_args({"attachment_search": val}).attachment_search)
+            self.assertTrue(MailQuery.from_args({"link_search": val}).link_search)
+        for val in ("", "0", "off"):
+            self.assertFalse(MailQuery.from_args({"attachment_search": val}).attachment_search)
+            self.assertFalse(MailQuery.from_args({"link_search": val}).link_search)
+
     def test_defaults_when_absent(self):
         q = MailQuery.from_args({})
         self.assertIsNone(q.main)
         self.assertIsNone(q.start)
         self.assertFalse(q.resources_only)
         self.assertFalse(q.passwords_only)
+        self.assertFalse(q.normalize_width)
+        self.assertFalse(q.attachment_search)
+        self.assertFalse(q.link_search)
         self.assertEqual(q.errors, ())
 
 
@@ -161,6 +178,84 @@ class FilterMailsTests(unittest.TestCase):
 
     def test_date_range_inclusive(self):
         self.assertEqual(self._ids({"start": "2026-06-11T00:00"}), ["b"])
+
+
+class NormalizeWidthTests(unittest.TestCase):
+    """The experimental keyword-only full-width<->half-width fold."""
+
+    def setUp(self):
+        # 'w' carries a full-width body, 'h' the half-width (ASCII) equivalent.
+        self.mails = [
+            _derived(id="w", subject="s", body="ＡＢＣ１２３"),
+            _derived(id="h", subject="s", body="abc123"),
+        ]
+
+    def _ids(self, args):
+        q = MailQuery.from_args(args)
+        self.assertEqual(q.errors, ())
+        return sorted(m["id"] for m in filter_mails(self.mails, q))
+
+    def test_off_keeps_widths_distinct(self):
+        # ASCII query matches only the ASCII body; full-width query only the full.
+        self.assertEqual(self._ids({"main": "abc123"}), ["h"])
+        self.assertEqual(self._ids({"main": "ＡＢＣ"}), ["w"])
+
+    def test_on_matches_both_widths(self):
+        self.assertEqual(self._ids({"main": "abc123", "normalize_width": "1"}), ["h", "w"])
+        self.assertEqual(self._ids({"main": "ＡＢＣ", "normalize_width": "1"}), ["h", "w"])
+
+    def test_on_applies_to_exclude(self):
+        # Folding the exclude field drops both widths of the matched term.
+        self.assertEqual(self._ids({"exclude": "abc123", "normalize_width": "1"}), [])
+
+    def test_on_does_not_touch_sender(self):
+        # Sender/recipient are matched exactly even with the fold on (keyword-only).
+        m = _derived(id="z", sender="ＡＢＣ", sender_email="z@x.com")
+        q = MailQuery.from_args({"sender": "abc", "normalize_width": "1"})
+        self.assertEqual([x["id"] for x in filter_mails([m], q)], [])
+
+
+class AttachmentLinkSearchTests(unittest.TestCase):
+    """The experimental Attachment / Link Search Matching keyword extensions."""
+
+    def setUp(self):
+        # 'att': keyword only in an attachment name; 'lnk': keyword only in a link
+        # URL (not in the prose); 'none': neither.
+        self.mails = [
+            _derived(id="att", subject="s", body="prose",
+                     attachments=[{"filename": "quarterly_invoice.pdf"}]),
+            _derived(id="lnk", subject="s",
+                     body="click https://portal.vendorhub.io/login now",
+                     attachments=[]),
+            _derived(id="none", subject="s", body="prose", attachments=[]),
+        ]
+
+    def _ids(self, args):
+        q = MailQuery.from_args(args)
+        self.assertEqual(q.errors, ())
+        return sorted(m["id"] for m in filter_mails(self.mails, q))
+
+    def test_attachment_name_ignored_by_default(self):
+        self.assertEqual(self._ids({"main": "invoice"}), [])
+
+    def test_attachment_name_matched_when_on(self):
+        self.assertEqual(self._ids({"main": "invoice", "attachment_search": "1"}), ["att"])
+
+    def test_link_matched_when_on(self):
+        # 'vendorhub' lives only in the link URL; the toggle surfaces it.
+        self.assertEqual(self._ids({"main": "vendorhub", "link_search": "1"}), ["lnk"])
+
+    def test_toggles_apply_to_exclude(self):
+        # With attachment search on, exclude drops the mail whose only match is its
+        # attachment name.
+        self.assertEqual(self._ids({"exclude": "invoice", "attachment_search": "1"}),
+                         ["lnk", "none"])
+
+    def test_both_toggles_compose(self):
+        self.assertEqual(
+            self._ids({"main": "invoice, vendorhub",
+                       "attachment_search": "1", "link_search": "1"}),
+            ["att", "lnk"])
 
 
 if __name__ == "__main__":

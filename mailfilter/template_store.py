@@ -6,9 +6,11 @@ the directory *is* the storage and the interchange format at once, so there is n
 separate JSON cache. Listing scans the folder; saving writes a file; exporting
 serves one; importing drops one in.
 
-Each body is passed through :func:`mailfilter.settings_store.coerce`, so a
+Each body is passed through :func:`mailfilter.settings_store.coerce_template`, so a
 template can only ever hold the known search fields — the same schema the sidebar
-persists. An in-memory index (name -> settings, name -> file path), rebuilt by
+persists, minus the per-session fields a preset shouldn't carry (the date range
+and the width-normalization toggle; see ``TEMPLATE_EXCLUDED_FIELDS``). An
+in-memory index (name -> settings, name -> file path), rebuilt by
 :meth:`load` and maintained on every write, backs the fast read paths; it is
 guarded by an ``RLock``.
 
@@ -27,7 +29,7 @@ import threading
 from pathlib import Path
 
 from . import imgcodec, util
-from .settings_store import DEFAULTS, coerce
+from .settings_store import DEFAULTS, coerce_template
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ class TemplateStore:
             except (ValueError, KeyError, TypeError, OSError):
                 log.warning("Skipping unreadable template file %s", path.name)
                 continue
-            templates[name] = coerce(settings, DEFAULTS)
+            templates[name] = coerce_template(settings, DEFAULTS)
             paths[name] = path
         with self._lock:
             self._templates = templates
@@ -86,7 +88,7 @@ class TemplateStore:
         distinct names already exist. Writes the PNG atomically.
         """
         name = _clean_name(name)
-        body = coerce(settings, DEFAULTS)
+        body = coerce_template(settings, DEFAULTS)
         with self._lock:
             if name not in self._templates and len(self._templates) >= MAX_TEMPLATES:
                 raise ValueError(f"template limit reached ({MAX_TEMPLATES})")

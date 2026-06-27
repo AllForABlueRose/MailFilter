@@ -132,6 +132,14 @@ class MailStore:
         mail["_links"] = extract_links(own_message_body(mail.get("body", "")))
         mail["_has_links"] = bool(mail["_links"])
         mail["_has_attachments"] = bool(mail.get("attachments"))
+        # Optional keyword-search targets (the Attachment/Link Search Matching
+        # experimental toggles in filters.py). Precomputed and lowercased here so a
+        # request only concatenates, never parses. Stripped before save like every
+        # "_" field.
+        mail["_attachment_text"] = " ".join(
+            a.get("filename", "") for a in mail.get("attachments", [])
+        ).lower()
+        mail["_links_text"] = " ".join(mail["_links"]).lower()
         # Keyword search (main / exclude) is subject + body only — sender and
         # recipient have their own dedicated fields (_sender_text/_recipient_text).
         mail["_search_text"] = "\n".join(

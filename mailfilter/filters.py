@@ -44,6 +44,13 @@ class MailQuery:
     links_blacklist: object = None
     resources_only: bool = False  # attachments and/or links
     passwords_only: bool = False  # only mail with a detected password (last scan)
+    # Experimental: fold full-width (全角) <-> half-width (半角) on the main/exclude
+    # keyword match so a search on one width also matches the other.
+    normalize_width: bool = False
+    # Experimental: extend the main/exclude keyword match beyond subject+body to
+    # attachment filenames and/or link URLs.
+    attachment_search: bool = False
+    link_search: bool = False
     errors: tuple = ()            # human-readable expression parse errors
 
     @classmethod
@@ -77,12 +84,35 @@ class MailQuery:
             links_blacklist=parse_field("links_blacklist"),
             resources_only=args.get("resources") in ("1", "true", "on"),
             passwords_only=args.get("passwords") in ("1", "true", "on"),
+            normalize_width=args.get("normalize_width") in ("1", "true", "on"),
+            attachment_search=args.get("attachment_search") in ("1", "true", "on"),
+            link_search=args.get("link_search") in ("1", "true", "on"),
             errors=tuple(errors),
         )
 
 
 def filter_mails(mails, query):
     """Select mails matching the query, preserving the input (newest-first) order."""
+    # Normalize Search Character Width (experimental, keyword fields only): fold
+    # the main/exclude query literals once up front and the mail's search text per
+    # mail below, so both sides compare in one width. Off (the default) keeps the
+    # parse-free fast path — the nodes are reused as-is and no folding runs.
+    main, exclude = query.main, query.exclude
+    fold = None
+    if query.normalize_width and (main is not None or exclude is not None):
+        fold = expr.fold_width
+        main = expr.fold_node(main, fold)
+        exclude = expr.fold_node(exclude, fold)
+
+    # Attachment/Link Search Matching (experimental, keyword fields only): extend
+    # the main/exclude text beyond subject+body with the precomputed attachment-name
+    # and/or link-URL fields. Off (default) leaves the keyword match at subject+body.
+    extra_keys = []
+    if query.attachment_search:
+        extra_keys.append("_attachment_text")
+    if query.link_search:
+        extra_keys.append("_links_text")
+
     results = []
     for mail in mails:
         received = mail["_received_dt"]
@@ -90,10 +120,16 @@ def filter_mails(mails, query):
             continue
         if query.end is not None and received > query.end:
             continue
-        if query.main is not None and not expr.evaluate(query.main, mail["_search_text"]):
-            continue
-        if query.exclude is not None and expr.evaluate(query.exclude, mail["_search_text"]):
-            continue
+        if main is not None or exclude is not None:
+            search_text = mail["_search_text"]
+            if extra_keys:
+                search_text = "\n".join([search_text] + [mail[k] for k in extra_keys])
+            if fold is not None:
+                search_text = fold(search_text)
+            if main is not None and not expr.evaluate(main, search_text):
+                continue
+            if exclude is not None and expr.evaluate(exclude, search_text):
+                continue
         if query.sender is not None and not expr.evaluate(query.sender, mail["_sender_text"]):
             continue
         if query.recipient is not None and not expr.evaluate(query.recipient, mail["_recipient_text"]):

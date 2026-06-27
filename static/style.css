@@ -1293,6 +1293,85 @@ input.drop-target{
     min-height:160px;
 }
 
+/* ----- Experimental Features (sidebar box + panel) ----- */
+/* The bounding box that holds the enabled experimental-feature controls. */
+.experimental{
+    margin-top:12px;
+    padding:10px;
+    border:1px solid #cbd5e1;
+    border-radius:8px;
+    background:#f8fafc;
+}
+/* The clickable header that opens the enable/disable panel. */
+.exp-header{
+    width:100%;
+    background:#e5e7eb;
+    color:#374151;
+    font-weight:bold;
+    margin-bottom:8px;
+}
+.exp-header:hover{
+    background:#d1d5db;
+}
+.exp-active{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+/* One mounted feature: a labelled group of that feature's own controls. */
+.exp-feature{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.exp-feature[hidden]{
+    display:none;
+}
+.exp-feature-name{
+    font-size:12px;
+    font-weight:bold;
+    color:#475569;
+}
+.exp-empty{
+    font-size:12px;
+    color:#94a3b8;
+    font-style:italic;
+}
+/* Panel: the enable/disable checklist. */
+.exp-help{
+    font-weight:normal;
+    font-size:13px;
+    color:#475569;
+    margin:0 0 12px;
+}
+.exp-check{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    column-gap:8px;
+    align-items:start;
+    padding:8px 0;
+    border-top:1px solid #e5e7eb;
+    cursor:pointer;
+}
+.exp-check-name{
+    font-weight:bold;
+    color:#374151;
+}
+.exp-check-desc{
+    grid-column:2;
+    font-size:12px;
+    color:#6b7280;
+}
+
+/* Suspected Customers List popup textarea (Resolve Customer Name To Downloads). */
+.suspected-customers-text{
+    width:100%;
+    box-sizing:border-box;
+    resize:vertical;
+    font-family:inherit;
+    font-size:13px;
+}
+
 /* ----- Smart Password Detection ----- */
 /* Sidebar Scan / Settings row under the 🔑 toggle. */
 .pwd-bar{

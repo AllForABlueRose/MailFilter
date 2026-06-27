@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 
 from mailfilter import crypto
-from mailfilter.settings_store import DEFAULTS, MAX_LEN, SettingsStore
+from mailfilter.settings_store import (
+    DEFAULTS, MAX_LEN, TEMPLATE_EXCLUDED_FIELDS, SettingsStore, coerce,
+    coerce_template)
 
 
 def _store():
@@ -52,6 +54,22 @@ class UpdateTests(unittest.TestCase):
     def test_string_length_is_capped(self):
         out = self.store.update({"main": "x" * (MAX_LEN * 4)})
         self.assertEqual(len(out["main"]), MAX_LEN)
+
+
+class CoerceTemplateTests(unittest.TestCase):
+    def test_excluded_fields_reset_to_defaults(self):
+        out = coerce_template({
+            "main": "keep", "start": "2026-01-01T00:00", "end": "2026-02-01T00:00",
+            "normalize_width": True, "resources": True,
+        })
+        self.assertEqual(out["main"], "keep")        # ordinary fields kept
+        self.assertIs(out["resources"], True)
+        for key in TEMPLATE_EXCLUDED_FIELDS:
+            self.assertEqual(out[key], DEFAULTS[key])
+
+    def test_keeps_full_schema_shape(self):
+        # Every key is still present (at its default), like coerce.
+        self.assertEqual(set(coerce_template({})), set(coerce({})))
 
 
 class PersistenceTests(unittest.TestCase):

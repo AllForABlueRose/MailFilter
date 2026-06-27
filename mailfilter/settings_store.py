@@ -30,10 +30,31 @@ DEFAULTS = {
     "links_blacklist": "",
     "resources": False,
     "passwords": False,
+    # Experimental: fold full-width <-> half-width on the keyword match. Persisted
+    # like the other search toggles so a relaunch (and templates) carry it.
+    "normalize_width": False,
+    # Experimental: extend the keyword match to attachment names / link URLs.
+    "attachment_search": False,
+    "link_search": False,
+    # Experimental (workspace, not search): append the sender's org name to
+    # batch-downloaded files. Persisted as a last-used preference; a saved template
+    # doesn't carry it (it's in TEMPLATE_EXCLUDED_FIELDS).
+    "append_customer_name": False,
+    # Experimental (workspace, not search): append a Suspected Customers List name
+    # found in a mail's content to batch-downloaded files. Also template-excluded.
+    "resolve_customer_name": False,
 }
 
 # Per-string cap so a buggy/hostile client can't grow the file without bound.
 MAX_LEN = 500
+
+# Fields the sidebar persists but a saved template deliberately does NOT carry:
+# the date range, the width-normalization toggle, and the download-naming toggle
+# are per-session/context (or workspace) choices, not part of a reusable search
+# preset. `coerce_template` forces these back to their defaults on save, and the UI
+# re-applies the live values after switching to a template (see templates.js).
+TEMPLATE_EXCLUDED_FIELDS = ("start", "end", "normalize_width", "append_customer_name",
+                            "resolve_customer_name")
 
 
 def coerce(raw, base=None):
@@ -54,6 +75,18 @@ def coerce(raw, base=None):
             continue
         value = raw[key]
         out[key] = bool(value) if isinstance(default, bool) else str(value)[:MAX_LEN]
+    return out
+
+
+def coerce_template(raw, base=None):
+    """Coerce a saved template body: like :func:`coerce`, but the
+    :data:`TEMPLATE_EXCLUDED_FIELDS` (date range + width normalization) are reset
+    to their defaults so a preset never carries them. The body keeps every key
+    (at its default) so its shape stays stable for the UI and export/import.
+    """
+    out = coerce(raw, base)
+    for key in TEMPLATE_EXCLUDED_FIELDS:
+        out[key] = DEFAULTS[key]
     return out
 
 

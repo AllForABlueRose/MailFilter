@@ -39,6 +39,18 @@ AUTOMATIONS_FILE = BASE_DIR / "automations_cache.json"
 # format as the other stores (see mailfilter/customer_store.py). The contact
 # directory itself is derived live from the mail cache, never persisted.
 CUSTOMERS_FILE = BASE_DIR / "customers_cache.json"
+# Suspected Customers List for the experimental "Resolve Customer Name To
+# Downloads" feature: a flat list of customer names to look for in mail content at
+# download time. Same encoded-at-rest JSON seam as the other stores (see
+# mailfilter/customer_match_store.py).
+CUSTOMER_MATCH_FILE = BASE_DIR / "customer_match_cache.json"
+# Which experimental features the user has enabled (the "Experimental Features"
+# sidebar section). A small flag set persisted through the same encoded-at-rest
+# seam as the other stores (see mailfilter/experimental_store.py). Enablement is
+# only "is this feature's control mounted in the sidebar"; a feature's own
+# operational state (e.g. the password filter, the normalize-width toggle) lives
+# in the search settings.
+EXPERIMENTAL_FILE = BASE_DIR / "experimental_cache.json"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Outlook
@@ -218,6 +230,37 @@ PASSWORD_TEMPLATE_MAX = 500       # the context box (literal text + placeholder)
 PASSWORD_VALUE_REGEX_MAX = 500    # the optional per-pattern value regex
 PASSWORD_MAX_PATTERNS = 50
 PASSWORD_MAX_MATCHES_PER_MAIL = 20
+
+# Experimental features. The known feature ids and their default enablement (all
+# off, so the sidebar box starts empty). Enabling a feature mounts its control in
+# the "Experimental Features" sidebar box; it does not by itself change search
+# results. The ids match both the data-feature attributes in the markup and (for
+# features that are also a search toggle) the search-settings key.
+#   passwords         — Smart Password Detection (the 🔑 filter + Scan + Settings)
+#   normalize_width   — Normalize Search Character Width (the 全角/半角 fold below)
+#   attachment_search — extend the main/exclude keyword match to attachment names
+#   link_search       — extend the main/exclude keyword match to link URLs
+#   append_customer_name — append the sender's org name to batch-downloaded files
+#   resolve_customer_name — append a Suspected Customers List name found in content
+EXPERIMENTAL_DEFAULTS = {
+    "passwords": False,
+    "normalize_width": False,
+    "attachment_search": False,
+    "link_search": False,
+    "append_customer_name": False,
+    "resolve_customer_name": False,
+}
+# Normalize Search Character Width: the Unicode normalization form used to fold
+# full-width (全角) and half-width (半角) variants of a character to one form so a
+# keyword search on one width also matches the other. NFKC maps full-width Latin/
+# digits/punctuation onto plain ASCII (and half-width katakana onto full-width).
+# Applied only when the feature's toggle is on, and only to the main/exclude
+# keyword fields (sender/recipient match exactly). See mailfilter/filters.py.
+SEARCH_NORMALIZE_FORM = "NFKC"
+# Caps on the Suspected Customers List (mailfilter/customer_match_store.py) so a
+# buggy/hostile client can't grow the file without bound.
+CUSTOMER_MATCH_MAX_NAMES = 500
+CUSTOMER_MATCH_NAME_MAX = 200
 
 # Server
 HOST = "127.0.0.1"

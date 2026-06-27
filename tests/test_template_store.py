@@ -11,7 +11,8 @@ from pathlib import Path
 
 from mailfilter import imgcodec
 from mailfilter.settings_store import DEFAULTS, MAX_LEN
-from mailfilter.template_store import MAX_NAME_LEN, MAX_TEMPLATES, TemplateStore
+from mailfilter.template_store import (
+    MAX_NAME_LEN, MAX_TEMPLATES, TemplateStore, _to_png)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -43,6 +44,19 @@ class SaveAndSnapshotTests(unittest.TestCase):
         self.assertEqual(set(snap["templates"]["T"]), set(DEFAULTS))
         self.assertNotIn("bogus", snap["templates"]["T"])
         self.assertIs(snap["templates"]["T"]["resources"], True)
+
+    def test_per_session_fields_not_saved(self):
+        # The date range and normalize-width toggle are reset to defaults: a
+        # template never carries them (settings_store.TEMPLATE_EXCLUDED_FIELDS).
+        snap = self.store.save("T", {
+            "main": "x", "start": "2026-01-01T00:00", "end": "2026-02-01T00:00",
+            "normalize_width": True,
+        })
+        body = snap["templates"]["T"]
+        self.assertEqual(body["main"], "x")        # ordinary fields still saved
+        self.assertEqual(body["start"], "")
+        self.assertEqual(body["end"], "")
+        self.assertIs(body["normalize_width"], False)
 
     def test_save_caps_field_length(self):
         snap = self.store.save("T", {"main": "x" * (MAX_LEN * 3)})
@@ -129,6 +143,24 @@ class LoadTests(unittest.TestCase):
             self.assertEqual(reloaded.snapshot()["names"], ["Saved"])
             self.assertEqual(reloaded.get("Saved")["main"], "needle")
             self.assertIs(reloaded.get("Saved")["resources"], True)
+
+    def test_load_strips_per_session_fields_from_legacy_file(self):
+        # A template file written before the exclusion (carrying a date range +
+        # normalize_width) is stripped on load, not trusted as-is.
+        with tempfile.TemporaryDirectory() as d:
+            directory = Path(d) / "search_templates"
+            directory.mkdir(parents=True)
+            legacy = {"main": "x", "start": "2026-01-01T00:00",
+                      "end": "2026-02-01T00:00", "normalize_width": True}
+            (directory / "legacy.png").write_bytes(_to_png("Legacy", legacy))
+
+            store = TemplateStore(directory)
+            store.load()
+            body = store.get("Legacy")
+            self.assertEqual(body["main"], "x")
+            self.assertEqual(body["start"], "")
+            self.assertEqual(body["end"], "")
+            self.assertIs(body["normalize_width"], False)
 
     def test_load_missing_directory_stays_empty(self):
         store = _store()

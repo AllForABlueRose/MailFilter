@@ -38,7 +38,8 @@ log = logging.getLogger(__name__)
 
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
-                     customer_store, compose_template_store, password_settings):
+                     customer_store, compose_template_store, password_settings,
+                     experimental_store, customer_match_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -174,16 +175,25 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     def api_download():
         """Save a batch of attachments to a dated folder on the server.
 
-        Body: ``{"items": [{"id": <mail id>, "index": <int>}, ...]}``. Files go
-        into ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a
-        time. Returns the folder and the saved filenames; per-item failures are
+        Body: ``{"items": [{"id": <mail id>, "index": <int>}, ...],
+        "append_customer_name": <bool>}``. Files go into
+        ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a time.
+        With ``append_customer_name`` on (the experimental toggle), a file whose
+        sender resolves to an organization gets ``_<org name>`` appended to its
+        stem. Returns the folder and the saved filenames; per-item failures are
         collected in ``errors`` rather than aborting the whole batch.
         """
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
 
-        folder, saved, errors = workspace_ops.save_attachments(store, data.get("items") or [])
+        append = data.get("append_customer_name") in (True, "1", "true", "on")
+        resolve = data.get("resolve_customer_name") in (True, "1", "true", "on")
+        orgs = customer_store.snapshot() if append else None
+        customer_names = customer_match_store.names() if resolve else None
+        folder, saved, errors = workspace_ops.save_attachments(
+            store, data.get("items") or [], append_org_name=append, orgs=orgs,
+            resolve_customer=resolve, customer_names=customer_names)
         for mid in {s["id"] for s in saved}:
             tag_store.record(mid, "downloaded")
         return jsonify({"folder": folder, "saved": saved, "errors": errors})
@@ -463,6 +473,32 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             "flagged": flagged,
             "pattern_errors": [{"component": n, "error": e} for n, e in errors],
         })
+
+    # ----- Experimental Features (which feature controls are mounted) -----
+
+    @bp.get("/api/experimental")
+    def get_experimental():
+        return jsonify(experimental_store.snapshot())
+
+    @bp.post("/api/experimental")
+    def save_experimental():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(experimental_store.update(data))
+
+    # ----- Suspected Customers List (Resolve Customer Name To Downloads) -----
+
+    @bp.get("/api/customer-match")
+    def get_customer_match():
+        return jsonify(customer_match_store.snapshot())
+
+    @bp.post("/api/customer-match")
+    def save_customer_match():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify(customer_match_store.update(data))
 
     return bp
 

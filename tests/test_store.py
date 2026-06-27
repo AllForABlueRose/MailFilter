@@ -96,6 +96,21 @@ class DerivedFieldsTests(unittest.TestCase):
         self.assertFalse(m["_has_links"])
         self.assertEqual(m["_links"], [])
 
+    def test_attachment_and_link_search_text(self):
+        # Lowercased, space-joined search targets for the Attachment/Link Search
+        # Matching toggles (filters.py).
+        m = MailStore._with_derived(make_mail(
+            attachments=[{"filename": "Report.PDF"}, {"filename": "Notes.txt"}],
+            body="see http://example.com/log",
+        ))
+        self.assertEqual(m["_attachment_text"], "report.pdf notes.txt")
+        self.assertEqual(m["_links_text"], "http://example.com/log")
+
+    def test_search_text_fields_empty_when_none(self):
+        m = MailStore._with_derived(make_mail(attachments=[], body="no urls here"))
+        self.assertEqual(m["_attachment_text"], "")
+        self.assertEqual(m["_links_text"], "")
+
 
 class MutationTests(unittest.TestCase):
     def setUp(self):

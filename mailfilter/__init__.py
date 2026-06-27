@@ -22,7 +22,9 @@ import config
 from . import automation, bootstrap, outlook
 from .automation_store import AutomationStore
 from .compose_template_store import ComposeTemplateStore
+from .customer_match_store import CustomerMatchStore
 from .customer_store import CustomerStore
+from .experimental_store import ExperimentalStore
 from .password_settings_store import PasswordSettingsStore
 from .routes import create_blueprint
 from .scheduler import RefreshScheduler
@@ -63,9 +65,16 @@ def create_app():
     password_settings = PasswordSettingsStore(config.PASSWORD_SETTINGS_FILE)
     password_settings.load()
 
+    experimental = ExperimentalStore(config.EXPERIMENTAL_FILE)
+    experimental.load()
+
+    customer_match = CustomerMatchStore(config.CUSTOMER_MATCH_FILE)
+    customer_match.load()
+
     app.register_blueprint(
         create_blueprint(store, settings, tags, templates, automations, customers,
-                         compose_templates, password_settings)
+                         compose_templates, password_settings, experimental,
+                         customer_match)
     )
 
     # Exposed for the entry point and for tests.
@@ -83,6 +92,8 @@ def create_app():
     app.extensions["customer_store"] = customers
     app.extensions["compose_template_store"] = compose_templates
     app.extensions["password_settings_store"] = password_settings
+    app.extensions["experimental_store"] = experimental
+    app.extensions["customer_match_store"] = customer_match
     app.extensions["mail_initializer"] = lambda: _start_initializer(store)
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,

@@ -46,12 +46,93 @@ function togglePasswords(){
     loadMail();
 }
 
-// `resources` and `passwords` are booleans handled via toggle buttons; the rest
-// are text fields mapped by SETTINGS_FIELDS.
-const SETTINGS_BOOLS = ['resources', 'passwords'];
+function syncNormalizeWidthButton(){
+    const btn = document.getElementById('normalizeWidthToggle');
+    btn.classList.toggle('active', normalizeWidth);
+    btn.setAttribute('aria-pressed', String(normalizeWidth));
+    btn.textContent = `🔀 Normalize Width: ${normalizeWidth ? 'On' : 'Off'}`;
+}
+
+function toggleNormalizeWidth(){
+    normalizeWidth = !normalizeWidth;
+    syncNormalizeWidthButton();
+    saveSettings();
+    highlightActiveTemplate();
+    loadMail();
+}
+
+function syncAttachmentSearchButton(){
+    const btn = document.getElementById('attachmentSearchToggle');
+    btn.classList.toggle('active', attachmentSearch);
+    btn.setAttribute('aria-pressed', String(attachmentSearch));
+    btn.textContent = `📎 Search Attachments: ${attachmentSearch ? 'On' : 'Off'}`;
+}
+
+function toggleAttachmentSearch(){
+    attachmentSearch = !attachmentSearch;
+    syncAttachmentSearchButton();
+    saveSettings();
+    highlightActiveTemplate();
+    loadMail();
+}
+
+function syncLinkSearchButton(){
+    const btn = document.getElementById('linkSearchToggle');
+    btn.classList.toggle('active', linkSearch);
+    btn.setAttribute('aria-pressed', String(linkSearch));
+    btn.textContent = `🔗 Search Links: ${linkSearch ? 'On' : 'Off'}`;
+}
+
+function toggleLinkSearch(){
+    linkSearch = !linkSearch;
+    syncLinkSearchButton();
+    saveSettings();
+    highlightActiveTemplate();
+    loadMail();
+}
+
+function syncAppendCustomerNameButton(){
+    const btn = document.getElementById('appendCustomerNameToggle');
+    btn.classList.toggle('active', appendCustomerName);
+    btn.setAttribute('aria-pressed', String(appendCustomerName));
+    btn.textContent = `🏢 Append Customer Name: ${appendCustomerName ? 'On' : 'Off'}`;
+}
+
+// A workspace/download preference, not a filter — persist it but don't reload the
+// list (nothing about the displayed mail changes).
+function toggleAppendCustomerName(){
+    appendCustomerName = !appendCustomerName;
+    syncAppendCustomerNameButton();
+    saveSettings();
+}
+
+function syncResolveCustomerNameButton(){
+    const btn = document.getElementById('resolveCustomerNameToggle');
+    btn.classList.toggle('active', resolveCustomerName);
+    btn.setAttribute('aria-pressed', String(resolveCustomerName));
+    btn.textContent = `🧩 Resolve Customer Name: ${resolveCustomerName ? 'On' : 'Off'}`;
+}
+
+// Also a workspace/download preference — persist only, no list reload.
+function toggleResolveCustomerName(){
+    resolveCustomerName = !resolveCustomerName;
+    syncResolveCustomerNameButton();
+    saveSettings();
+}
+
+// `resources`, `passwords`, `normalize_width`, `attachment_search`, `link_search`,
+// `append_customer_name` and `resolve_customer_name` are booleans handled via
+// toggle buttons; the rest are text fields mapped by SETTINGS_FIELDS.
+const SETTINGS_BOOLS = ['resources', 'passwords', 'normalize_width',
+                        'attachment_search', 'link_search', 'append_customer_name',
+                        'resolve_customer_name'];
 
 function currentSettings(){
-    const settings = {resources: resourcesOnly, passwords: passwordsOnly};
+    const settings = {resources: resourcesOnly, passwords: passwordsOnly,
+                      normalize_width: normalizeWidth,
+                      attachment_search: attachmentSearch, link_search: linkSearch,
+                      append_customer_name: appendCustomerName,
+                      resolve_customer_name: resolveCustomerName};
     for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
         settings[key] = document.getElementById(id).value;
     }
@@ -87,6 +168,16 @@ function applySettings(settings){
     syncResourcesButton();
     passwordsOnly = !!settings.passwords;
     syncPasswordsButton();
+    normalizeWidth = !!settings.normalize_width;
+    syncNormalizeWidthButton();
+    attachmentSearch = !!settings.attachment_search;
+    syncAttachmentSearchButton();
+    linkSearch = !!settings.link_search;
+    syncLinkSearchButton();
+    appendCustomerName = !!settings.append_customer_name;
+    syncAppendCustomerNameButton();
+    resolveCustomerName = !!settings.resolve_customer_name;
+    syncResolveCustomerNameButton();
     // Reveal an exclude field if it carries a value.
     Object.keys(EXCLUDE_FIELDS).forEach(which => {
         setExcludeVisible(which, !!document.getElementById(EXCLUDE_FIELDS[which].field).value);
