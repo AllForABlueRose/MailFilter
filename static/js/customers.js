@@ -17,6 +17,21 @@
 
 const ROLE_LABELS = { member: "Member", representative: "Representative" };
 
+// The name to *show* for an org in this view: its display-name nickname, or the
+// real `name` when the nickname is blank — unless the reveal key (Z) is currently
+// held (showRealOrgNames), which forces the real name everywhere. Resolution/
+// workflows elsewhere always use the real `name`; this is display-only.
+function orgDisplayName(o){
+    if(!o) return "";
+    if(showRealOrgNames) return o.name;
+    return (o.display_name && o.display_name.trim()) ? o.display_name : o.name;
+}
+
+// org id -> display name, for directory rows that only carry the org id.
+function orgDisplayNameById(id){
+    return id ? orgDisplayName(customersById[id]) : "";
+}
+
 // Drag payloads. A name/email chip carries the contact's email under MIME_REP
 // (drop => pin as Representative); a domain chip carries the domain under
 // MIME_DOMAIN (drop => map domain as Member). Distinct types let the org card's
@@ -80,7 +95,13 @@ function renderOrganizations(){
 
 function createOrgCard(o, counts){
     const card = document.createElement("div");
-    card.className = "org-card" + (o.id === selectedOrgId ? " selected" : "");
+    // Appearance: outline|filled style + an optional texture; both come straight
+    // from the (already-clamped) stored fields, prefixed into class names. The
+    // pattern colour adapts to the style via a CSS var (org tint vs. white) in CSS.
+    card.className = "org-card"
+        + " style-" + (o.card_style || "outline")
+        + " pattern-" + (o.card_pattern || "none")
+        + (o.id === selectedOrgId ? " selected" : "");
     card.style.setProperty("--org-color", o.color);
     card.title = "Click to view this organization's contacts";
     card.onclick = () => selectOrg(o.id);
@@ -101,7 +122,7 @@ function createOrgCard(o, counts){
     head.className = "org-card-head";
     const name = document.createElement("h3");
     name.className = "org-card-name";
-    name.textContent = o.name;
+    name.textContent = orgDisplayName(o);
     head.appendChild(name);
     card.appendChild(head);
 
@@ -121,6 +142,17 @@ function createOrgCard(o, counts){
         chips.appendChild(none);
     }
     card.appendChild(chips);
+
+    // Notes: free-text "be mindful of this org" copy. User input, so inserted as
+    // DOM text (never HTML), the people-field rule. Clamped by CSS; full text on
+    // hover. Omitted entirely when blank so empty cards stay compact.
+    if((o.notes || "").trim()){
+        const notes = document.createElement("div");
+        notes.className = "org-notes";
+        notes.textContent = o.notes;
+        notes.title = o.notes;
+        card.appendChild(notes);
+    }
 
     const c = counts || {member: 0, representative: 0};
     const overrides = (o.contacts || []).length;
@@ -177,6 +209,42 @@ function clearOrgSelection(){
     renderDirectory();
 }
 
+// ----- "hold to reveal real names" -----
+
+// While the reveal key (Z) is held, every org name in the view shows the real
+// `name` instead of the display nickname; releasing restores. Idempotent so a
+// stray keyup/blur can't desync.
+function revealRealOrgNames(on){
+    on = !!on;
+    if(on === showRealOrgNames) return;
+    showRealOrgNames = on;
+    renderOrganizations();
+    renderDirectory();
+}
+
+// Keyboard hold: hold Z to reveal — only while the Customer Management view is
+// showing and the user isn't typing in a field (so it never eats a literal "z"
+// in the org-name or directory-search box). Wired once from init().
+function initOrgNameReveal(){
+    const inField = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"
+        || el.isContentEditable);
+    const customersActive = () => {
+        const view = document.getElementById("view-customers");
+        return view && !view.classList.contains("view-hidden");
+    };
+    document.addEventListener("keydown", (e) => {
+        if(e.code !== "KeyZ" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+        if(!customersActive() || inField(e.target)) return;
+        e.preventDefault();
+        revealRealOrgNames(true);
+    });
+    document.addEventListener("keyup", (e) => {
+        if(e.code === "KeyZ") revealRealOrgNames(false);
+    });
+    // If focus leaves the window mid-hold the keyup may never arrive.
+    window.addEventListener("blur", () => revealRealOrgNames(false));
+}
+
 // ----- contact directory -----
 
 function scopedContacts(){
@@ -198,7 +266,7 @@ function renderDirectory(){
 
     const org = selectedOrgId ? customersById[selectedOrgId] : null;
     document.getElementById("directoryScope").textContent =
-        org ? `${org.name} — assigned contacts` : "Unassigned contacts";
+        org ? `${orgDisplayName(org)} — assigned contacts` : "Unassigned contacts";
     document.getElementById("directoryBackBtn").hidden = !org;
     // The role sort only matters when an org (with both members and reps) is shown.
     document.getElementById("roleSortBtn").hidden = !org;
@@ -307,7 +375,7 @@ function roleCell(c, isRep){
     const td = document.createElement("td");
     if(isRep){
         td.appendChild(roleBadge("Representative", "role-rep"));
-        const base = c.member_org_name || "no base org";
+        const base = orgDisplayNameById(c.member_org_id) || c.member_org_name || "no base org";
         const sub = document.createElement("span");
         sub.className = "role-subtle";
         sub.textContent = "member of " + base;
@@ -401,9 +469,14 @@ function openOrgBuilder(id){
 
     document.getElementById("orgModalTitle").textContent = o ? "Edit Organization" : "New Organization";
     document.getElementById("orgName").value = o ? o.name : "";
+    document.getElementById("orgDisplayName").value = o ? (o.display_name || "") : "";
     document.getElementById("orgColor").value = o ? o.color : "#3b82f6";
     document.getElementById("orgCategory").value = o ? (o.category || "") : "";
     document.getElementById("orgCategoryColor").value = o ? (o.category_color || "#6366f1") : "#6366f1";
+    document.getElementById("orgCardStyle").value = o ? (o.card_style || "outline") : "outline";
+    document.getElementById("orgCardPattern").value = o ? (o.card_pattern || "none") : "none";
+    document.getElementById("orgNotes").value = o ? (o.notes || "") : "";
+    updateOrgPreview();
     document.getElementById("orgMemberDomains").value = domainsForRole(o, "member");
     document.getElementById("orgRepDomains").value = domainsForRole(o, "representative");
 
@@ -421,6 +494,88 @@ function closeOrgBuilder(){
     editingOrgId = null;
 }
 
+// ----- colour helpers (builder) -----
+
+// Hex <-> HSL so we can derive a related accent and generate pleasant randoms.
+function hexToHsl(hex){
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    const n = m ? parseInt(m[1], 16) : 0x3b82f6;
+    let r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if(d){
+        if(max === r) h = ((g - b) / d) % 6;
+        else if(max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+        if(h < 0) h += 360;
+    }
+    const l = (max + min) / 2;
+    const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+    return {h, s, l};
+}
+
+function hslToHex(h, s, l){
+    h = ((h % 360) + 360) % 360;
+    s = Math.min(1, Math.max(0, s));
+    l = Math.min(1, Math.max(0, l));
+    const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if(h < 60){ r = c; g = x; }
+    else if(h < 120){ r = x; g = c; }
+    else if(h < 180){ g = c; b = x; }
+    else if(h < 240){ g = x; b = c; }
+    else if(h < 300){ r = x; b = c; }
+    else { r = c; b = x; }
+    const hh = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+    return "#" + hh(r) + hh(g) + hh(b);
+}
+
+// The badge accent derived from the card colour: a close, distinct variant —
+// hue nudged ~25 deg and lightness/saturation pulled toward a legible mid-tone.
+function deriveCategoryColor(hex){
+    const {h, s, l} = hexToHsl(hex);
+    return hslToHex(h + 25, Math.max(0.45, Math.min(0.9, s)), Math.min(0.62, Math.max(0.45, l)));
+}
+
+// A random but pleasant card colour (full hue range, mid saturation/lightness so
+// it is never near-white or near-black) plus its derived badge accent. Vary the
+// hue from the current one so a repeat click visibly changes it.
+function randomizeOrgColor(){
+    const prev = hexToHsl(document.getElementById("orgColor").value);
+    const h = (prev.h + 60 + Math.floor(Math.random() * 240)) % 360;
+    const color = hslToHex(h, 0.55 + Math.random() * 0.25, 0.45 + Math.random() * 0.12);
+    document.getElementById("orgColor").value = color;
+    onOrgColorChanged();
+}
+
+// Card colour changed (picker or randomize): re-derive the badge accent and
+// refresh the live preview. The user can still edit the badge colour afterward.
+function onOrgColorChanged(){
+    document.getElementById("orgCategoryColor").value =
+        deriveCategoryColor(document.getElementById("orgColor").value);
+    updateOrgPreview();
+}
+
+// Paint the modal's mini preview card from the current control values so the
+// style/pattern/colour choices are visible before saving.
+function updateOrgPreview(){
+    const card = document.getElementById("orgPreview");
+    if(!card) return;
+    const style = document.getElementById("orgCardStyle").value;
+    const pattern = document.getElementById("orgCardPattern").value;
+    card.className = "org-card org-preview-card style-" + style + " pattern-" + pattern;
+    card.style.setProperty("--org-color", document.getElementById("orgColor").value);
+    const name = document.getElementById("orgName").value.trim()
+        || document.getElementById("orgDisplayName").value.trim() || "Preview";
+    card.querySelector(".org-card-name").textContent = name;
+    const cat = card.querySelector(".org-cat");
+    const catText = document.getElementById("orgCategory").value.trim();
+    cat.textContent = catText;
+    cat.hidden = !catText;
+    cat.style.setProperty("--cat-color", document.getElementById("orgCategoryColor").value);
+}
+
 // Parse a textarea (one domain per line) into [{domain, role}, ...].
 function parseDomains(textareaId, role){
     return (document.getElementById(textareaId).value || "")
@@ -436,9 +591,13 @@ async function saveOrganization(){
 
     const payload = {
         name,
+        display_name: document.getElementById("orgDisplayName").value.trim(),
         color: document.getElementById("orgColor").value,
         category: document.getElementById("orgCategory").value.trim(),
         category_color: document.getElementById("orgCategoryColor").value,
+        card_style: document.getElementById("orgCardStyle").value,
+        card_pattern: document.getElementById("orgCardPattern").value,
+        notes: document.getElementById("orgNotes").value.trim(),
         domains: parseDomains("orgMemberDomains", "member")
             .concat(parseDomains("orgRepDomains", "representative")),
     };

@@ -38,6 +38,55 @@ class CoerceTests(unittest.TestCase):
     def test_blank_name_defaults_to_untitled(self):
         self.assertEqual(_store().create({"name": "   "})["name"], "Untitled")
 
+    def test_display_name_kept_when_given(self):
+        org = _store().create({"name": "Acme Corporation K.K.", "display_name": "Acme"})
+        self.assertEqual(org["name"], "Acme Corporation K.K.")
+        self.assertEqual(org["display_name"], "Acme")
+
+    def test_blank_display_name_stays_empty_not_untitled(self):
+        # Empty is meaningful (the view falls back to the real name), so unlike
+        # `name` it must NOT default to "Untitled".
+        self.assertEqual(_store().create({"name": "Acme"})["display_name"], "")
+        self.assertEqual(_store().create({"name": "Acme", "display_name": "  "})["display_name"], "")
+
+    def test_display_name_preserved_on_update_when_omitted(self):
+        store = _store()
+        org = store.create({"name": "Acme Corporation K.K.", "display_name": "Acme"})
+        # A save that sends only the name must not wipe the nickname.
+        self.assertEqual(store.update(org["id"], {"name": "Acme Corp K.K."})["display_name"], "Acme")
+
+    def test_card_style_pattern_default_to_first(self):
+        org = _store().create({"name": "A"})
+        self.assertEqual(org["card_style"], "outline")
+        self.assertEqual(org["card_pattern"], "none")
+
+    def test_card_style_pattern_kept_and_clamped(self):
+        store = _store()
+        ok = store.create({"name": "A", "card_style": "filled", "card_pattern": "dots"})
+        self.assertEqual((ok["card_style"], ok["card_pattern"]), ("filled", "dots"))
+        # Unknown values clamp to the first entry of each tuple.
+        bad = store.create({"name": "B", "card_style": "neon", "card_pattern": "swirl"})
+        self.assertEqual((bad["card_style"], bad["card_pattern"]), ("outline", "none"))
+
+    def test_card_style_pattern_preserved_on_update_when_omitted(self):
+        store = _store()
+        org = store.create({"name": "A", "card_style": "filled", "card_pattern": "grid"})
+        updated = store.update(org["id"], {"name": "A2"})
+        self.assertEqual((updated["card_style"], updated["card_pattern"]), ("filled", "grid"))
+
+    def test_notes_default_empty_kept_and_capped(self):
+        import config
+        self.assertEqual(_store().create({"name": "A"})["notes"], "")
+        kept = _store().create({"name": "A", "notes": "  CC procurement\nJPY only  "})
+        self.assertEqual(kept["notes"], "CC procurement\nJPY only")   # trimmed, newline kept
+        capped = _store().create({"name": "A", "notes": "x" * (config.ORG_NOTES_MAX + 50)})
+        self.assertEqual(len(capped["notes"]), config.ORG_NOTES_MAX)
+
+    def test_notes_preserved_on_update_when_omitted(self):
+        store = _store()
+        org = store.create({"name": "A", "notes": "be mindful"})
+        self.assertEqual(store.update(org["id"], {"name": "A2"})["notes"], "be mindful")
+
     def test_invalid_color_falls_back(self):
         self.assertEqual(_store().create({"name": "A", "color": "red"})["color"], "#3b82f6")
 

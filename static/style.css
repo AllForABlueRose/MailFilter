@@ -888,10 +888,32 @@ input.drop-target{
     padding:4px 10px;
     font-size:12px;
 }
+/* The organization grid is a CSS multi-column ("masonry") layout rather than the
+   row grid the Automations view uses: each card keeps its natural height and the
+   cards below pack upward into the space under a shorter neighbour, instead of
+   every card in a row stretching to match the tallest. Cards flow top-to-bottom
+   down each column, then on to the next. This overrides the .auto-grid rules the
+   same element also carries — equal specificity, so later source order wins. */
+.cust-orgs{
+    display:block;
+    column-width:260px;   /* the old grid's min track width: responsive column count */
+    column-gap:16px;
+}
+.cust-orgs > .auto-empty{
+    column-span:all;      /* the "no organizations yet" message spans every column */
+}
+.cust-orgs .org-card{
+    -webkit-column-break-inside:avoid;
+    break-inside:avoid;   /* never split a card across two columns */
+    margin-bottom:16px;   /* column-gap is horizontal only — space stacked cards */
+}
 /* Org cards reuse the automation card shape, but are always coloured (there is no
    running/idle state) — the accent paints the name, border, and chips. */
 .org-card{
     --org-color:#3b82f6;
+    /* The pattern-fill ink. Outline cards tint the org colour faintly over white;
+       filled cards (below) switch it to translucent white over the colour. */
+    --pattern-color:color-mix(in srgb, var(--org-color) 16%, transparent);
     position:relative;
     display:flex;
     flex-direction:column;
@@ -914,8 +936,64 @@ input.drop-target{
 }
 .org-card.drag-over{
     box-shadow:0 0 0 3px var(--org-color);
-    background:#f8fafc;
+    background-color:#f8fafc;   /* background-color, not the shorthand, so the pattern survives */
 }
+
+/* ----- Filled card style (the reverse of the default outline look) ----- */
+/* Outline = white fill, coloured text/border (the default above). Filled = the
+   org colour as the card background, white text and a white border. The pattern
+   ink flips to translucent white so a texture reads over the colour. */
+.org-card.style-filled{
+    --pattern-color:rgba(255,255,255,0.22);
+    background-color:var(--org-color);
+    border-color:#fff;
+    color:#fff;
+}
+.org-card.style-filled .org-card-name{ color:#fff; }
+.org-card.style-filled .org-card-foot{ color:rgba(255,255,255,0.88); }
+.org-card.style-filled .org-nodomains{ color:rgba(255,255,255,0.85); }
+/* The selection/drop ring is the org colour, invisible on a same-colour card, so
+   give filled cards a white inner ring then the colour outer ring for contrast. */
+.org-card.style-filled.selected,
+.org-card.style-filled.drag-over{
+    box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--org-color);
+}
+.org-card.style-filled.drag-over{ background-color:var(--org-color); }
+/* The category pill on a filled card is a solid overlay in its own selected
+   colour (not translucent), with white text and a dotted white border so it
+   reads as sitting on top of the coloured card. */
+.org-card.style-filled .org-cat{
+    color:#fff;
+    border-color:#fff;
+    background-color:var(--cat-color);
+    background-image:none;
+}
+
+/* ----- Pattern fills (uniform CSS-gradient textures; ink = --pattern-color) ----- */
+/* background-image only, so each layers over the card's background-colour without
+   disturbing it; equal specificity to the style rules but a different property. */
+.org-card.pattern-dots{
+    background-image:radial-gradient(var(--pattern-color) 1.5px, transparent 1.6px);
+    background-size:12px 12px;
+}
+.org-card.pattern-lines{
+    background-image:repeating-linear-gradient(45deg,
+        var(--pattern-color) 0 2px, transparent 2px 10px);
+}
+.org-card.pattern-grid{
+    background-image:
+        linear-gradient(var(--pattern-color) 1px, transparent 1px),
+        linear-gradient(90deg, var(--pattern-color) 1px, transparent 1px);
+    background-size:14px 14px;
+}
+.org-card.pattern-checker{
+    background-image:
+        linear-gradient(45deg, var(--pattern-color) 25%, transparent 25% 75%, var(--pattern-color) 75%),
+        linear-gradient(45deg, var(--pattern-color) 25%, transparent 25% 75%, var(--pattern-color) 75%);
+    background-size:16px 16px;
+    background-position:0 0, 8px 8px;
+}
+
 /* Actions live in a bordered box pinned bottom-right, walled off from the card's
    visual elements (the category label owns the top-right corner). */
 .org-card-actions{
@@ -986,6 +1064,29 @@ input.drop-target{
 .org-cat-field input[type=text]{
     flex:1;
 }
+/* Builder: card colour picker + its Randomize button share a row. */
+.org-color-field{
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+.org-randomize{
+    padding:6px 12px;
+    font-size:13px;
+}
+/* Builder: live preview of the card's chosen style/pattern/colours. The mini
+   card is non-interactive (it just mirrors the form) and never stretches. */
+.org-preview-wrap{
+    display:flex;
+    justify-content:center;
+    padding:6px 0 2px;
+}
+.org-preview-card{
+    width:220px;
+    min-height:84px;
+    margin-bottom:0;
+    cursor:default;
+}
 .org-chips{
     display:flex;
     flex-wrap:wrap;
@@ -1016,6 +1117,26 @@ input.drop-target{
     font-size:12px;
     color:#9ca3af;
     font-style:italic;
+}
+/* Notes block on the card: muted prose under the chips, separated by a dashed
+   rule tinted to the org colour. Newlines are preserved and the text is clamped
+   to a few lines (full text on hover); the masonry layout absorbs taller cards. */
+.org-notes{
+    font-size:12px;
+    line-height:1.45;
+    color:#4b5563;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    padding-top:8px;
+    border-top:1px dashed color-mix(in srgb, var(--org-color) 30%, #e5e7eb);
+    display:-webkit-box;
+    -webkit-line-clamp:4;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+.org-card.style-filled .org-notes{
+    color:rgba(255,255,255,0.92);
+    border-top-color:rgba(255,255,255,0.45);
 }
 .org-card-foot{
     font-size:12px;
@@ -1175,6 +1296,14 @@ input.drop-target{
     resize:vertical;
     font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size:13px;
+}
+/* Notes textarea (prose, not domains — so the default proportional font). */
+.org-notes-input{
+    width:100%;
+    min-height:72px;
+    resize:vertical;
+    font-size:13px;
+    line-height:1.5;
 }
 
 /* ----- Bulk Compose view ----- */

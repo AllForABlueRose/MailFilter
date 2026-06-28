@@ -5,6 +5,9 @@ async function init(){
     // Wire the app-shell header tabs (view switching).
     initTabs();
 
+    // Hold-to-reveal real org names in Customer Management (button + ` key).
+    initOrgNameReveal();
+
     // Close the thread / automation popups on a backdrop click or Escape.
     document.getElementById('threadModal').addEventListener('click', e => {
         if(e.target.id === 'threadModal'){ closeThread(); }

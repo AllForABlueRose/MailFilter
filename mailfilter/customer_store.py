@@ -2,9 +2,15 @@
 
 An organization groups the people the user corresponds with so replies can later
 be templated by formality (internal employee vs. customer — the motivating use
-case). Each org is a small dict: a name, a card colour, a free-text formality
+case). Each org is a small dict: a (real, legal) ``name``, an optional ``display_name``
+nickname shown in the Customer Management view in place of the name (blank => the
+name is shown; downstream workflows always resolve the real ``name``, never this),
+a card colour, a free-text formality
 ``category`` (empty by default — configured later) with its own ``category_color``
-label accent, a set of ``domains`` and a set
+label accent, a ``card_style``/``card_pattern`` pair driving the card's appearance
+(outline vs. filled, and an optional texture), free-text ``notes`` (things to be
+mindful of when dealing with the org — also the home for future per-org settings,
+which extend the coerced fields the same way), a set of ``domains`` and a set
 of per-contact ``contacts`` overrides, each carrying a role from
 ``config.ORG_DOMAIN_ROLES`` ("member" or "representative").
 
@@ -45,6 +51,12 @@ def _role(value):
     """Clamp a role to the known set, defaulting to the first ("member")."""
     role = str(value or "").strip().lower()
     return role if role in config.ORG_DOMAIN_ROLES else config.ORG_DOMAIN_ROLES[0]
+
+
+def _enum(value, allowed):
+    """Clamp a string to an allowed tuple, defaulting to its first entry."""
+    v = str(value or "").strip().lower()
+    return v if v in allowed else allowed[0]
 
 
 def _coerce_domains(raw):
@@ -253,14 +265,24 @@ class CustomerStore:
             base.get("category_color", DEFAULT_CATEGORY_COLOR))
 
         name = _clean(raw.get("name", base.get("name", "")), config.ORG_NAME_MAX) or "Untitled"
+        # Optional nickname. Blank is meaningful (the view falls back to the real
+        # name), so it is NOT defaulted to "Untitled" the way name is.
+        display_name = _clean(
+            raw.get("display_name", base.get("display_name", "")), config.ORG_DISPLAY_NAME_MAX)
         category = _clean(raw.get("category", base.get("category", "")), config.ORG_CATEGORY_MAX)
 
         return {
             "id": oid,
             "name": name,
+            "display_name": display_name,
             "color": color,
             "category": category,
             "category_color": category_color,
+            "card_style": _enum(
+                raw.get("card_style", base.get("card_style")), config.ORG_CARD_STYLES),
+            "card_pattern": _enum(
+                raw.get("card_pattern", base.get("card_pattern")), config.ORG_CARD_PATTERNS),
+            "notes": _clean(raw.get("notes", base.get("notes", "")), config.ORG_NOTES_MAX),
             "domains": _coerce_domains(raw.get("domains", base.get("domains", []))),
             "contacts": _coerce_contacts(raw.get("contacts", base.get("contacts", []))),
             "created": created,

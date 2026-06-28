@@ -30,3 +30,4 @@ let editingOrgId = null;         // id open in the org builder, or null when cre
 let contactDirectory = [];       // aggregated+resolved contacts, from the last /api/contacts load
 let selectedOrgId = null;        // org whose contacts the directory shows; null = unassigned contacts
 let roleSortRepsOnTop = false;   // org-contact sort: representatives first when true, members first when false
+let showRealOrgNames = false;    // while the "hold to reveal" button/key is held, show real org names instead of display names

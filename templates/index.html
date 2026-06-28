@@ -352,16 +352,45 @@
       <button class="icon-btn" onclick="closeOrgBuilder()" title="Close">✕</button>
     </div>
     <div class="modal-body auto-form">
-      <label for="orgName">Name</label>
-      <input type="text" id="orgName" maxlength="120" placeholder="e.g. Acme Corp">
+      <label for="orgName">Name <span class="auto-form-hint">(real / legal — used by every workflow)</span></label>
+      <input type="text" id="orgName" maxlength="120" placeholder="e.g. Acme Corporation K.K." oninput="updateOrgPreview()">
+
+      <label for="orgDisplayName">Display name <span class="auto-form-hint">(nickname shown in this view; blank = use the real name)</span></label>
+      <input type="text" id="orgDisplayName" maxlength="120" placeholder="e.g. Acme" oninput="updateOrgPreview()">
+
+      <div class="org-preview-wrap">
+        <div id="orgPreview" class="org-card org-preview-card style-outline pattern-none">
+          <div class="org-card-head"><h3 class="org-card-name">Preview</h3></div>
+          <span class="org-cat" hidden></span>
+        </div>
+      </div>
 
       <label for="orgColor">Color <span class="auto-form-hint">(card &amp; badge accent)</span></label>
-      <input type="color" id="orgColor" value="#3b82f6">
+      <div class="org-color-field">
+        <input type="color" id="orgColor" value="#3b82f6" oninput="onOrgColorChanged()">
+        <button type="button" class="flip-btn org-randomize" onclick="randomizeOrgColor()"
+                title="Pick a random card colour (the badge accent follows)">🎲 Randomize</button>
+      </div>
 
-      <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later)</span></label>
+      <label for="orgCardStyle">Card style</label>
+      <select id="orgCardStyle" onchange="updateOrgPreview()">
+        <option value="outline">Outline — white card, coloured text &amp; border</option>
+        <option value="filled">Filled — coloured card, white text &amp; border</option>
+      </select>
+
+      <label for="orgCardPattern">Card pattern</label>
+      <select id="orgCardPattern" onchange="updateOrgPreview()">
+        <option value="none">None</option>
+        <option value="dots">Dots</option>
+        <option value="lines">Lines</option>
+        <option value="grid">Grid</option>
+        <option value="checker">Checker</option>
+      </select>
+
+      <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later; colour follows the card colour, override below)</span></label>
       <div class="org-cat-field">
-        <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner">
-        <input type="color" id="orgCategoryColor" value="#6366f1" title="Category label color">
+        <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner" oninput="updateOrgPreview()">
+        <input type="color" id="orgCategoryColor" value="#6366f1" title="Category label color" oninput="updateOrgPreview()">
       </div>
 
       <label for="orgMemberDomains">Member domains <span class="auto-form-hint">(one per line — the org's own staff)</span></label>
@@ -370,6 +399,9 @@
       <label for="orgRepDomains">Representative domains <span class="auto-form-hint">(one per line — 3rd parties fronting this org)</span></label>
       <textarea id="orgRepDomains" class="org-domains" placeholder="repfirm.com"></textarea>
       <div class="auto-form-hint">Individual people on other domains (e.g. a gmail rep) are pinned from the Contacts table.</div>
+
+      <label for="orgNotes">Notes <span class="auto-form-hint">(things to be mindful of when dealing with this organization)</span></label>
+      <textarea id="orgNotes" class="org-notes-input" maxlength="2000" placeholder="e.g. Always CC their procurement desk; invoices in JPY only; slow to reply on Fridays."></textarea>
     </div>
     <div class="modal-actions auto-modal-actions">
       <button type="button" id="orgDeleteBtn" class="auto-del-btn" onclick="deleteOrganizationFromBuilder()" hidden>Delete</button>

@@ -83,7 +83,21 @@ ORG_DOMAIN_ROLES = ("member", "representative")
 # Per-string caps so a buggy/hostile client can't grow the customers cache without
 # bound (org name, formality category, a single domain, a single email).
 ORG_NAME_MAX = 120
+# The org's optional display name (a nickname shown in the Customer Management
+# view in place of the real `name`; blank => the real name is shown). Downstream
+# workflows always resolve the real `name`, never this. Capped like the name.
+ORG_DISPLAY_NAME_MAX = 120
 ORG_CATEGORY_MAX = 60
+# Org-card appearance (Customer Management). `card_style` swaps the card between
+# the default outline look (white fill, coloured text/border) and a filled look
+# (the org colour as background, white text/border); `card_pattern` overlays a
+# subtle, uniform texture. Both are coerced to the first entry when unknown.
+ORG_CARD_STYLES = ("outline", "filled")
+ORG_CARD_PATTERNS = ("none", "dots", "lines", "grid", "checker")
+# Free-text notes shown on the org card — things to be mindful of when dealing
+# with this organization. This is also the home for future per-organization
+# settings (they extend the coerced fields the same way), so the cap is generous.
+ORG_NOTES_MAX = 2000
 ORG_DOMAIN_MAX = 255
 ORG_EMAIL_MAX = 320
 
