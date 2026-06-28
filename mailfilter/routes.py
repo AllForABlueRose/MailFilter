@@ -37,9 +37,71 @@ from .presenter import to_view_model
 log = logging.getLogger(__name__)
 
 
+# ----- Smart Password Detection scan + Key Vault capture (module-level so the
+# scheduler / refresh path can reuse them, not just the route closures) -----
+
+def resolve_org_id(customer_store, email):
+    """The org id a sender resolves to (representative-of preferred), or None."""
+    res = customers.resolve(email, customer_store.snapshot())
+    return res.get("rep_org_id") or res.get("member_org_id")
+
+
+def capture_scanned_passwords(store, vault_store, customer_store):
+    """Record the latest scan's detected passwords into the unlocked vault (sender's
+    org, or the Unassigned bucket). Idempotent; returns how many were captured."""
+    captured = 0
+    for mail in store.snapshot():
+        secrets = mail.get("_passwords") or []
+        if not secrets:
+            continue
+        email = mail.get("sender_email") or ""
+        org_id = resolve_org_id(customer_store, email) or config.VAULT_UNASSIGNED_ORG_ID
+        for secret in secrets:
+            if vault_store.capture_scan(org_id, secret, source_email=email) is not None:
+                captured += 1
+    return captured
+
+
+def run_password_scan(store, password_settings, vault_store, customer_store):
+    """Compile patterns, scan every cached mail, record hits, and (while the vault is
+    unlocked) auto-capture them. Shared by POST /api/passwords/scan, the on-unlock
+    auto-scan, and the post-refresh hook. Returns the JSON-able result dict."""
+    snap = password_settings.snapshot()
+    compiled, errors = password_detect.compile_patterns(snap["patterns"])
+    rules = snap["rules"]
+    mails = store.snapshot()
+    matches = {}
+    for mail in mails:
+        text = "\n".join([mail.get("subject", ""), mail.get("body", "")])
+        found = password_detect.scan_text(
+            text, compiled, rules, config.PASSWORD_MAX_MATCHES_PER_MAIL)
+        if found:
+            matches[mail["id"]] = found
+    flagged = store.apply_password_scan(matches)
+    unlocked = vault_store.is_unlocked()
+    captured = capture_scanned_passwords(store, vault_store, customer_store) if unlocked else 0
+    pending = 0 if unlocked else sum(len(v) for v in matches.values())
+    return {
+        "scanned": len(mails),
+        "flagged": flagged,
+        "pattern_errors": [{"component": n, "error": e} for n, e in errors],
+        "vault_captured": captured,
+        "vault_pending": pending,
+        "vault_locked": not unlocked,
+    }
+
+
+def refresh_then_scan(store, password_settings, vault_store, customer_store):
+    """Refresh callback for the scheduler and POST /refresh: fetch + sync mail from
+    Outlook, then run an SDS scan so badges/captures reflect newly-arrived mail. The
+    scan is read-only against the mailbox and only writes the vault when unlocked."""
+    outlook.refresh(store)
+    run_password_scan(store, password_settings, vault_store, customer_store)
+
+
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
                      customer_store, compose_template_store, password_settings,
-                     experimental_store, customer_match_store):
+                     experimental_store, customer_match_store, vault_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query):
@@ -47,6 +109,41 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                              query.attachment_blacklist, query.links_blacklist)
         view["tags"] = tag_store.tags_for(mail["id"])
         return view
+
+    def _resolve_org_id(email):
+        return resolve_org_id(customer_store, email)
+
+    def _capture_scanned_to_vault():
+        return capture_scanned_passwords(store, vault_store, customer_store)
+
+    def _flush_vault_captures():
+        """Re-home parked captures, then record pending scan hits. No-op while
+        locked — called after a Customer Management assignment so the captures
+        queued by a locked-vault scan land in the right org once it's mapped."""
+        if not vault_store.is_unlocked():
+            return
+        vault_store.rehome_unassigned(_resolve_org_id)
+        _capture_scanned_to_vault()
+
+    def _vault_org_names():
+        """`{org_id: display name}` for vault grouping/search, plus the Unassigned
+        bucket label — built here so `vault_store` needs no customer-store import."""
+        names = {config.VAULT_UNASSIGNED_ORG_ID: "Unassigned"}
+        for org in customer_store.snapshot():
+            names[org["id"]] = (org.get("display_name") or "").strip() or org.get("name", "")
+        return names
+
+    def _run_password_scan():
+        return run_password_scan(store, password_settings, vault_store, customer_store)
+
+    def _on_vault_unlocked():
+        """After a successful create/unlock: re-home parked captures, then auto-scan
+        so detection + capture run immediately (the 'invisible queue' — logging back
+        in records everything outstanding without a manual scan)."""
+        if not vault_store.is_unlocked():
+            return
+        vault_store.rehome_unassigned(_resolve_org_id)
+        _run_password_scan()
 
     @bp.get("/")
     def index():
@@ -118,9 +215,10 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
     @bp.post("/refresh")
     def refresh_now():
+        # Fetch + sync, then run the SDS scan so badges/captures reflect new mail.
         threading.Thread(
-            target=outlook.refresh,
-            args=(store,),
+            target=refresh_then_scan,
+            args=(store, password_settings, vault_store, customer_store),
             daemon=True,
         ).start()
         return jsonify({"status": "started"})
@@ -282,7 +380,13 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
     @bp.get("/api/organizations")
     def list_organizations():
-        return jsonify({"organizations": customer_store.snapshot()})
+        # Attach each org's non-secret vault summary (count/kinds/last scan) so the
+        # card can show a read-only "has keys" line without unlocking the vault.
+        orgs = customer_store.snapshot()
+        index = vault_store.index()
+        for org in orgs:
+            org["vault"] = index.get(org["id"], {})
+        return jsonify({"organizations": orgs})
 
     @bp.post("/api/organizations")
     def create_organization():
@@ -317,6 +421,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         org = customer_store.set_domain(oid, data.get("domain"), data.get("role", "member"))
         if org is None:
             abort(404, description="unknown organization or blank domain")
+        # A newly-mapped domain may resolve parked captures to this org.
+        _flush_vault_captures()
         return jsonify(org)
 
     @bp.get("/api/contacts")
@@ -341,6 +447,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         org = customer_store.assign(data.get("email"), data.get("org_id"), data.get("role"))
         if org is None:
             abort(404, description="unknown organization or blank email")
+        # Assigning the sender may resolve parked captures to this org.
+        _flush_vault_captures()
         return jsonify(org)
 
     @bp.post("/api/contacts/unassign")
@@ -349,6 +457,117 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
         return jsonify({"removed": customer_store.unassign(data.get("email"))})
+
+    # ----- Key Vault (Workshop view) -----
+    # Secrets are sealed under a master passphrase (AES-256-GCM, scrypt). The
+    # routes never return secrets in bulk: list/entries are redacted; a single
+    # secret is returned only by the explicit /reveal, and the passphrase is used
+    # transiently to derive the key (never stored, never echoed back).
+
+    @bp.get("/api/vault/status")
+    def vault_status():
+        return jsonify(vault_store.status())
+
+    @bp.post("/api/vault/init")
+    def vault_init():
+        data = request.get_json(silent=True) or {}
+        if not vault_store.is_available():
+            abort(503, description="vault cipher unavailable on this machine")
+        if not vault_store.init(data.get("passphrase") or ""):
+            abort(400, description="vault already exists or passphrase too short")
+        # A brand-new (unlocked) vault scans + captures any already-detected mail.
+        _on_vault_unlocked()
+        return jsonify(vault_store.status())
+
+    @bp.post("/api/vault/unlock")
+    def vault_unlock():
+        data = request.get_json(silent=True) or {}
+        ok = (vault_store.unlock_with_dpapi() if data.get("dpapi")
+              else vault_store.unlock(data.get("passphrase") or ""))
+        if not ok:
+            abort(401, description="could not unlock the vault")
+        # Logging back in immediately re-homes parked captures and auto-scans, so
+        # the queued passwords are recorded without a manual scan.
+        _on_vault_unlocked()
+        return jsonify(vault_store.status())
+
+    @bp.post("/api/vault/lock")
+    def vault_lock():
+        vault_store.lock()
+        return jsonify(vault_store.status())
+
+    @bp.post("/api/vault/remember")
+    def vault_remember():
+        data = request.get_json(silent=True) or {}
+        if not vault_store.remember_on_machine(bool(data.get("enable"))):
+            abort(400, description="cannot change remember setting (locked or no DPAPI)")
+        return jsonify(vault_store.status())
+
+    @bp.get("/api/vault/entries")
+    def vault_entries():
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        return jsonify({"entries": vault_store.entries_by_org()})
+
+    @bp.post("/api/vault/entries")
+    def vault_add_entry():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        entry = vault_store.add_entry(data.get("org_id"), data)
+        if entry is None:
+            abort(400, description="could not add the key (unknown org or limit reached)")
+        return jsonify(entry)
+
+    @bp.put("/api/vault/entries/<entry_id>")
+    def vault_update_entry(entry_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        entry = vault_store.update_entry(entry_id, data)
+        if entry is None:
+            abort(404)
+        return jsonify(entry)
+
+    @bp.delete("/api/vault/entries/<entry_id>")
+    def vault_delete_entry(entry_id):
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        return jsonify({"removed": vault_store.delete_entry(entry_id)})
+
+    @bp.post("/api/vault/entries/<entry_id>/reveal")
+    def vault_reveal_entry(entry_id):
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        secret = vault_store.reveal(entry_id)
+        if secret is None:
+            abort(404)
+        return jsonify({"secret": secret})
+
+    @bp.post("/api/vault/reveal-all")
+    def vault_reveal_all():
+        """Every entry's secret as `{entry_id: secret}` for the hold-Z "reveal all"
+        affordance. The one sanctioned **bulk** secret read — gated on unlocked
+        (**423** otherwise), nothing persisted or logged."""
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        return jsonify({"secrets": vault_store.reveal_all()})
+
+    @bp.post("/api/vault/search")
+    def vault_search():
+        """Entries matching `{query}` across secret value / org name / datetime (and
+        label/username/url), grouped by org, **secrets redacted**. The value match
+        runs server-side so secrets are never shipped to filter them. **423** when
+        locked."""
+        data = request.get_json(silent=True) or {}
+        if not vault_store.is_unlocked():
+            abort(423, description="vault is locked")
+        return jsonify({"entries": vault_store.search(data.get("query", ""), _vault_org_names())})
+
 
     # ----- Bulk Compose (reply-draft generation) -----
 
@@ -451,28 +670,16 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     def scan_passwords():
         """Run the password detector over every cached mail and record the hits.
 
-        Reads-only: compiles the saved patterns, scans each mail's subject+body
-        (the full cached body, not the card excerpt), and stashes the per-mail
-        matches on the store for the badge + the ``passwords`` sidebar filter.
-        Nothing is written to disk or to the mailbox. Returns the scanned/flagged
-        counts and any patterns that failed to compile."""
-        snap = password_settings.snapshot()
-        compiled, errors = password_detect.compile_patterns(snap["patterns"])
-        rules = snap["rules"]
-        matches = {}
-        mails = store.snapshot()
-        for mail in mails:
-            text = "\n".join([mail.get("subject", ""), mail.get("body", "")])
-            found = password_detect.scan_text(
-                text, compiled, rules, config.PASSWORD_MAX_MATCHES_PER_MAIL)
-            if found:
-                matches[mail["id"]] = found
-        flagged = store.apply_password_scan(matches)
-        return jsonify({
-            "scanned": len(mails),
-            "flagged": flagged,
-            "pattern_errors": [{"component": n, "error": e} for n, e in errors],
-        })
+        Reads-only against the mailbox: compiles the saved patterns, scans each
+        mail's subject+body (the full cached body, not the card excerpt), and
+        stashes the per-mail matches on the store for the badge + the ``passwords``
+        sidebar filter. Also **auto-captures** detected passwords into the Key Vault
+        (sender's org, or the Unassigned bucket) when it is unlocked; when locked the
+        hits stay on the store and the next unlock auto-scans + records them. Returns
+        the scanned/flagged counts, any patterns that failed to compile, and the
+        vault capture/queue status. The scan also runs automatically on vault
+        unlock, so search need not re-trigger it."""
+        return jsonify(_run_password_scan())
 
     # ----- Experimental Features (which feature controls are mounted) -----
 

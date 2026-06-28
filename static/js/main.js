@@ -8,6 +8,10 @@ async function init(){
     // Hold-to-reveal real org names in Customer Management (button + ` key).
     initOrgNameReveal();
 
+    // Hold-Z reveal for Key Vault keys, and the startup Key Vault login screen.
+    initVaultReveal();
+    showVaultLogin();
+
     // Close the thread / automation popups on a backdrop click or Escape.
     document.getElementById('threadModal').addEventListener('click', e => {
         if(e.target.id === 'threadModal'){ closeThread(); }
@@ -27,8 +31,11 @@ async function init(){
     document.getElementById('suspectedCustomersModal').addEventListener('click', e => {
         if(e.target.id === 'suspectedCustomersModal'){ closeSuspectedCustomers(); }
     });
+    document.getElementById('vaultEntryModal').addEventListener('click', e => {
+        if(e.target.id === 'vaultEntryModal'){ closeVaultEntry(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); closeExperimental(); closeSuspectedCustomers(); return; }
+        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); closeExperimental(); closeSuspectedCustomers(); closeVaultEntry(); return; }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
@@ -41,6 +48,7 @@ async function init(){
         if(!document.getElementById('passwordModal').hidden) return;
         if(!document.getElementById('experimentalModal').hidden) return;
         if(!document.getElementById('suspectedCustomersModal').hidden) return;
+        if(!document.getElementById('vaultEntryModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });

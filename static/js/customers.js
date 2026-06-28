@@ -154,6 +154,13 @@ function createOrgCard(o, counts){
         card.appendChild(notes);
     }
 
+    // Read-only Key Vault status (fixed, not editable). Driven by the non-secret
+    // vault index merged into the org payload — never the secrets themselves. Sits
+    // in the notes area as a "be mindful: this org has stored keys" line. The same
+    // box is mirrored, read-only, into the org editor (buildVaultInfoBox).
+    const vaultBox = buildVaultInfoBox(o.vault);
+    if(vaultBox) card.appendChild(vaultBox);
+
     const c = counts || {member: 0, representative: 0};
     const overrides = (o.contacts || []).length;
     const foot = document.createElement("div");
@@ -173,6 +180,37 @@ function createOrgCard(o, counts){
     actions.appendChild(edit);
     card.appendChild(actions);
     return card;
+}
+
+// One read-only Key Vault status line (fixed text, never user input).
+function makeVaultLine(text){
+    const line = document.createElement("div");
+    line.className = "org-vault-line";
+    line.textContent = text;
+    return line;
+}
+
+// The read-only Key Vault status box from the non-secret org.vault index, or null
+// when the org has no stored keys. Shared by the org card and the org editor.
+function buildVaultInfoBox(vault){
+    vault = vault || {};
+    if(!vault.count) return null;
+    const box = document.createElement("div");
+    box.className = "org-vault-info";
+    box.title = "Manage these in Workshop → Key Vaults";
+    const lead = document.createElement("span");
+    lead.className = "org-vault-lead";
+    lead.textContent = "🔑 Key Vault";
+    box.appendChild(lead);
+    if(vault.has_managed){
+        box.appendChild(makeVaultLine("Has customer-managed keys"));
+    }
+    if(vault.has_temporary){
+        box.appendChild(makeVaultLine(vault.last_scan_dt
+            ? `Has temporary keys from ${vault.last_scan_dt} scan`
+            : "Has temporary keys"));
+    }
+    return box;
 }
 
 // Make an org card accept dropped contact/domain chips.
@@ -476,6 +514,16 @@ function openOrgBuilder(id){
     document.getElementById("orgCardStyle").value = o ? (o.card_style || "outline") : "outline";
     document.getElementById("orgCardPattern").value = o ? (o.card_pattern || "none") : "none";
     document.getElementById("orgNotes").value = o ? (o.notes || "") : "";
+
+    // Read-only Key Vault status mirrored from the card (shown only when the org
+    // has stored keys); never editable, never the secrets themselves.
+    const vaultWrap = document.getElementById("orgVaultInfo");
+    const vaultBody = document.getElementById("orgVaultInfoBody");
+    vaultBody.innerHTML = "";
+    const vaultBox = o ? buildVaultInfoBox(o.vault) : null;
+    if(vaultBox){ vaultBody.appendChild(vaultBox); vaultWrap.hidden = false; }
+    else { vaultWrap.hidden = true; }
+
     updateOrgPreview();
     document.getElementById("orgMemberDomains").value = domainsForRole(o, "member");
     document.getElementById("orgRepDomains").value = domainsForRole(o, "representative");

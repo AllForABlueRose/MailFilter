@@ -53,6 +53,45 @@ CUSTOMER_MATCH_FILE = BASE_DIR / "customer_match_cache.json"
 EXPERIMENTAL_FILE = BASE_DIR / "experimental_cache.json"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# Key Vault (Workshop view). Per-organization credential storage, protected far
+# more strongly than the other caches: the file is sealed with AES-256-GCM under
+# a key derived from a user **master passphrase** via scrypt, so it is useless
+# without the passphrase even to the same OS user (the caches are only
+# DPAPI/base64, i.e. transparent to your own account). Secrets live ONLY here.
+VAULT_FILE = BASE_DIR / "vault_cache.json"
+# Non-secret per-org index ({org_id: {count, has_managed, has_temporary,
+# last_scan_dt}}) so the Customer Management card can show a read-only "has keys"
+# line WITHOUT unlocking the vault. It carries no secrets, so it uses the ordinary
+# encoded-at-rest seam (DPAPI/base64) like the other caches.
+VAULT_INDEX_FILE = BASE_DIR / "vault_index.json"
+# Optional "remember on this machine" (the passphrase + DPAPI-assist unlock): the
+# scrypt-derived key, DPAPI-wrapped, so a session can unlock without re-entering
+# the passphrase. Only as strong as the OS account while present; deleted on
+# "forget". Never the passphrase itself, and only created on an explicit opt-in.
+VAULT_KEY_DPAPI_FILE = BASE_DIR / "vault_key.dpapi"
+# scrypt KDF cost. N must be a power of two; 2**15 with r=8 needs ~32 MiB, which
+# the store passes explicitly as maxmem so it is not clamped by the default.
+VAULT_SCRYPT_N = 2 ** 15
+VAULT_SCRYPT_R = 8
+VAULT_SCRYPT_P = 1
+VAULT_KEY_LEN = 32  # AES-256
+VAULT_PASSPHRASE_MIN = 8
+# Entry kinds: "managed" = user-entered customer-managed key; "temporary" =
+# captured from a Smart Password Detection scan (carries the scan datetime).
+VAULT_KINDS = ("managed", "temporary")
+VAULT_LABEL_MAX = 120
+VAULT_USERNAME_MAX = 200
+VAULT_SECRET_MAX = 4096
+VAULT_URL_MAX = 500
+VAULT_MAX_ENTRIES_PER_ORG = 200
+# Bucket id for captured keys whose sender resolves to no organization. Not a real
+# org (no card), just a holding key in the same {org_id: [...]} map; a later
+# Customer Management assignment re-homes the entry to the resolved org.
+VAULT_UNASSIGNED_ORG_ID = "unassigned"
+# Idle auto-lock: an unlocked vault re-locks after this many seconds without a
+# successful access, so a walked-away session does not leave secrets reachable.
+VAULT_LOCK_TIMEOUT_SECONDS = 900
+
 # Outlook
 OUTLOOK_INBOX_FOLDER = 6  # olFolderInbox
 

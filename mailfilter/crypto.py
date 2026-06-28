@@ -107,6 +107,27 @@ def decode(data):
     raise ValueError(f"unknown cache algorithm id {alg}")
 
 
+def dpapi_protect(payload, entropy):
+    """DPAPI-encrypt ``payload`` bytes user-scoped, bound to ``entropy`` bytes.
+
+    Public seam reused by the Key Vault's "remember on this machine" key-wrap
+    (mailfilter/vault_crypto.py). Raises :class:`CacheCipherUnavailable` off
+    Windows / without pywin32, so callers must gate on :func:`is_available`.
+    """
+    win32crypt = _win32crypt()
+    blob = win32crypt.CryptProtectData(
+        payload, "MailFilter vault key", entropy, None, None, _CRYPTPROTECT_UI_FORBIDDEN)
+    return bytes(blob)
+
+
+def dpapi_unprotect(body, entropy):
+    """Reverse :func:`dpapi_protect`. Raises if the blob is foreign/tampered."""
+    win32crypt = _win32crypt()
+    _description, data = win32crypt.CryptUnprotectData(
+        body, entropy, None, None, _CRYPTPROTECT_UI_FORBIDDEN)
+    return bytes(data)
+
+
 def _header(alg):
     return MAGIC + bytes([alg])
 

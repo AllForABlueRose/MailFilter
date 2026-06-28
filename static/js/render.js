@@ -207,10 +207,17 @@ function renderPasswordGroup(mail, card){
     mail.passwords.forEach((pw, i) => {
         const item = document.createElement('span');
         item.className = 'resource-item pw-item';
-        item.textContent = pw;   // raw value, inserted as DOM text (never HTML)
-        item.title = 'Hover to locate it in the message';
         item.addEventListener('mouseenter', () => togglePwLocation(card, i, true));
         item.addEventListener('mouseleave', () => togglePwLocation(card, i, false));
+
+        const value = document.createElement('span');
+        value.className = 'pw-value';
+        value.textContent = pw;   // raw value, inserted as DOM text (never HTML)
+        value.title = 'Hover to locate it in the message';
+        item.appendChild(value);
+
+        // Detected passwords are auto-recorded into the sender's org Key Vault by
+        // the scan itself (POST /api/passwords/scan); there is no per-chip save.
         group.appendChild(item);
     });
     return group;

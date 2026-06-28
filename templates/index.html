@@ -18,6 +18,7 @@
     <button type="button" class="appnav-item" data-tab="automations">Automations</button>
     <button type="button" class="appnav-item" data-tab="customers">Customer Management</button>
     <button type="button" class="appnav-item" data-tab="bulk">Bulk Compose</button>
+    <button type="button" class="appnav-item" data-tab="workshop">Workshop</button>
   </nav>
 </header>
 <div id="view-mailfilter" class="container view" data-view="mailfilter">
@@ -402,6 +403,13 @@
 
       <label for="orgNotes">Notes <span class="auto-form-hint">(things to be mindful of when dealing with this organization)</span></label>
       <textarea id="orgNotes" class="org-notes-input" maxlength="2000" placeholder="e.g. Always CC their procurement desk; invoices in JPY only; slow to reply on Fridays."></textarea>
+
+      <!-- Read-only Key Vault status, mirrored from the card. Filled by
+           openOrgBuilder from the non-secret org.vault index; never editable. -->
+      <div id="orgVaultInfo" class="org-vault-edit" hidden>
+        <label>Key Vault <span class="auto-form-hint">(read-only — manage in Workshop → Key Vaults)</span></label>
+        <div id="orgVaultInfoBody"></div>
+      </div>
     </div>
     <div class="modal-actions auto-modal-actions">
       <button type="button" id="orgDeleteBtn" class="auto-del-btn" onclick="deleteOrganizationFromBuilder()" hidden>Delete</button>
@@ -637,6 +645,66 @@
   </div>
 </div>
 
+<section id="view-workshop" class="view view-workshop view-hidden" data-view="workshop">
+  <div class="auto-bar">
+    <h2 class="auto-title">Workshop</h2>
+  </div>
+  <p class="cust-hint">
+    Tools for working with your customers. <b>Key Vaults</b> stores
+    per-organization credentials, sealed with a master passphrase (AES-256-GCM) —
+    far stronger than the other caches, and used by workflows that need customer
+    keys. Secrets are kept only here; the customer cards show only that keys exist.
+  </p>
+
+  <div class="ws-section">
+    <h3 class="ws-section-title">🔐 Key Vaults</h3>
+    <!-- workshop.js fills this from /api/vault/status: unavailable / create /
+         unlock / unlocked-list. -->
+    <div id="vaultPanel" class="vault-panel"></div>
+  </div>
+</section>
+
+<div id="vaultEntryModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2 id="vaultEntryTitle">New Key</h2>
+      <button class="icon-btn" onclick="closeVaultEntry()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      <label for="vaultEntryOrg">Organization</label>
+      <select id="vaultEntryOrg"></select>
+
+      <label for="vaultEntryLabel">Label</label>
+      <input type="text" id="vaultEntryLabel" maxlength="120" placeholder="e.g. FTP login, Portal password">
+
+      <label for="vaultEntryUsername">Username <span class="auto-form-hint">(optional)</span></label>
+      <input type="text" id="vaultEntryUsername" maxlength="200" placeholder="e.g. acme-svc">
+
+      <label for="vaultEntrySecret">Secret</label>
+      <input type="text" id="vaultEntrySecret" maxlength="4096" placeholder="the password / key" autocomplete="off">
+
+      <label for="vaultEntryUrl">URL <span class="auto-form-hint">(optional)</span></label>
+      <input type="text" id="vaultEntryUrl" maxlength="500" placeholder="https://portal.acme.com">
+
+      <div id="vaultEntryError" class="bulk-tmpl-error" hidden></div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" id="vaultEntryDeleteBtn" class="auto-del-btn" onclick="deleteVaultEntry()" hidden>Delete</button>
+      <button type="button" class="auto-save-btn" onclick="saveVaultEntry()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Startup Key Vault login. Shown first on launch (workshop.js::showVaultLogin):
+     create on first run, unlock otherwise, or Skip to use the rest of the app with
+     the Password Manager locked. -->
+<div id="vaultLoginOverlay" class="vault-login-overlay" hidden>
+  <div class="vault-login-box">
+    <h2 class="vault-login-title">🔐 Key Vault</h2>
+    <div id="vaultLoginPanel"></div>
+  </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/state.js') }}"></script>
 <script src="{{ url_for('static', filename='js/render.js') }}"></script>
 <script src="{{ url_for('static', filename='js/search.js') }}"></script>
@@ -651,6 +719,7 @@
 <script src="{{ url_for('static', filename='js/passworddetect.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customermatch.js') }}"></script>
 <script src="{{ url_for('static', filename='js/experimental.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workshop.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

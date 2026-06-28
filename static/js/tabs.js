@@ -11,6 +11,7 @@ const TAB_TITLES = {
     automations: "Automations",
     customers: "Customer Management",
     bulk: "Bulk Compose",
+    workshop: "Workshop",
 };
 
 function setActiveTab(name){
@@ -36,6 +37,10 @@ function onTabEntered(name){
     // Refresh the reply-template list (and shared-mailbox banner) on entry.
     if(name === "bulk" && typeof loadComposeTemplates === "function"){
         loadComposeTemplates();
+    }
+    // Re-check the vault lock state (it can auto-lock) and re-render on entry.
+    if(name === "workshop" && typeof loadVault === "function"){
+        loadVault();
     }
 }
 

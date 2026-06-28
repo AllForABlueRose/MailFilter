@@ -256,6 +256,14 @@ async function runPasswordScan(){
             const nums = data.pattern_errors.map(e => '#' + e.component).join(', ');
             msg += ` ⚠ Check component(s): ${nums}`;
         }
+        // Detected passwords are auto-saved into each sender's Key Vault. When the
+        // vault is locked the writes are deferred until it's unlocked.
+        if(data.vault_locked && data.vault_pending){
+            msg += ` 🔒 ${data.vault_pending} key(s) queued — unlock the Key Vault `
+                + `(Workshop → Key Vaults) to record them.`;
+        } else if(data.vault_captured){
+            msg += ` 🔒 ${data.vault_captured} key(s) saved to the Key Vault.`;
+        }
         setPasswordStatus(msg);
         loadMail();
     }catch(e){

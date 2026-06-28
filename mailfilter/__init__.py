@@ -26,12 +26,13 @@ from .customer_match_store import CustomerMatchStore
 from .customer_store import CustomerStore
 from .experimental_store import ExperimentalStore
 from .password_settings_store import PasswordSettingsStore
-from .routes import create_blueprint
+from .routes import create_blueprint, refresh_then_scan
 from .scheduler import RefreshScheduler
 from .settings_store import SettingsStore
 from .store import MailStore
 from .tag_store import TagStore
 from .template_store import TemplateStore
+from .vault_store import VaultStore
 
 
 def create_app():
@@ -71,10 +72,14 @@ def create_app():
     customer_match = CustomerMatchStore(config.CUSTOMER_MATCH_FILE)
     customer_match.load()
 
+    # The Key Vault reads its files lazily (and only decrypts once unlocked), so
+    # there is nothing to load at startup — it begins locked.
+    vault = VaultStore(config.VAULT_FILE, config.VAULT_INDEX_FILE, config.VAULT_KEY_DPAPI_FILE)
+
     app.register_blueprint(
         create_blueprint(store, settings, tags, templates, automations, customers,
                          compose_templates, password_settings, experimental,
-                         customer_match)
+                         customer_match, vault)
     )
 
     # Exposed for the entry point and for tests.
@@ -94,10 +99,13 @@ def create_app():
     app.extensions["password_settings_store"] = password_settings
     app.extensions["experimental_store"] = experimental
     app.extensions["customer_match_store"] = customer_match
+    app.extensions["vault_store"] = vault
     app.extensions["mail_initializer"] = lambda: _start_initializer(store)
+    # Each periodic refresh fetches + syncs mail, then runs the SDS scan (read-only;
+    # captures into the vault only while it is unlocked).
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,
-        lambda: outlook.refresh(store),
+        lambda: refresh_then_scan(store, password_settings, vault, customers),
     )
     # Ticks every AUTOMATION_TICK_SECONDS and runs each enabled automation whose
     # interval has elapsed. Like mail_scheduler, the entry point owns start().

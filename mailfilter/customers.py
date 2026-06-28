@@ -159,11 +159,13 @@ def resolve(email, orgs):
     The single-address analog of :func:`build_directory`'s per-contact resolution
     (override > domain, first-wins), so Bulk Compose can branch a reply template on
     who the sender is without rebuilding the whole directory. Returns
-    ``{member_org_name, member_category, rep_org_name, role}`` -- empty strings
-    when unresolved; ``role`` is "representative" if a rep mapping exists, else
-    "member" if a base membership exists, else "".
+    ``{member_org_id, member_org_name, member_category, rep_org_id, rep_org_name,
+    role}`` -- ids/strings empty when unresolved; ``role`` is "representative" if a
+    rep mapping exists, else "member" if a base membership exists, else "". The ids
+    let callers (e.g. the Key Vault capture route) key by org without a name lookup.
     """
-    blank = {"member_org_name": "", "member_category": "", "rep_org_name": "", "role": ""}
+    blank = {"member_org_id": None, "member_org_name": "", "member_category": "",
+             "rep_org_id": None, "rep_org_name": "", "role": ""}
     email = _normalize_email(email)
     if not email:
         return blank
@@ -172,8 +174,10 @@ def resolve(email, orgs):
     member_org = maps["member_email"].get(email) or maps["member_domain"].get(domain)
     rep_org = maps["rep_email"].get(email) or maps["rep_domain"].get(domain)
     return {
+        "member_org_id": member_org.get("id") if member_org else None,
         "member_org_name": member_org.get("name", "") if member_org else "",
         "member_category": member_org.get("category", "") if member_org else "",
+        "rep_org_id": rep_org.get("id") if rep_org else None,
         "rep_org_name": rep_org.get("name", "") if rep_org else "",
         "role": "representative" if rep_org else ("member" if member_org else ""),
     }

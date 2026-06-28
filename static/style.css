@@ -1627,3 +1627,213 @@ input.drop-target{
     font-weight:bold;
     color:#2563eb;
 }
+
+/* ----- Workshop view / Key Vaults ----- */
+.view-workshop{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    overflow:auto;
+    padding:24px;
+}
+.ws-section{
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    padding:18px;
+    background:#fff;
+}
+.ws-section-title{
+    margin:0 0 14px;
+    font-size:16px;
+    color:#374151;
+}
+.vault-note{
+    margin:0 0 12px;
+    font-size:13px;
+    color:#6b7280;
+}
+/* Unlock / create gate: a narrow stack of inputs + action. */
+.vault-gate{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:10px;
+    max-width:420px;
+}
+.vault-input{
+    width:100%;
+    padding:9px 11px;
+    border:1px solid #d1d5db;
+    border-radius:8px;
+    font-size:14px;
+}
+.vault-dpapi-btn{
+    padding:7px 12px;
+}
+/* Unlocked: toolbar over org-grouped key tables. */
+.vault-toolbar{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:16px;
+}
+.vault-toolbar-spacer{ flex:1; }
+.vault-remember{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:13px;
+    color:#4b5563;
+}
+.vault-org{ margin-bottom:18px; }
+.vault-org-name{
+    margin:0 0 6px;
+    font-size:14px;
+    color:#1f2937;
+}
+.vault-table{ width:100%; }
+.vault-row > td{
+    padding:8px 10px;
+    border-bottom:1px solid #f3f4f6;
+    vertical-align:top;
+}
+.vault-cell-label{ width:42%; }
+.vault-label-text{
+    font-weight:600;
+    color:#374151;
+    margin-right:8px;
+    overflow-wrap:anywhere;
+}
+.vault-kind{
+    display:inline-block;
+    font-size:10px;
+    font-weight:600;
+    padding:1px 7px;
+    border-radius:999px;
+    vertical-align:middle;
+}
+.vault-kind-managed{ background:#e0e7ff; color:#3730a3; }
+.vault-kind-temp{ background:#fef3c7; color:#92400e; }
+.vault-url{
+    font-size:11px;
+    color:#6b7280;
+    overflow-wrap:anywhere;
+    margin-top:3px;
+}
+.vault-cell-user{
+    font-size:13px;
+    color:#4b5563;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow-wrap:anywhere;
+}
+.vault-cell-secret{ white-space:nowrap; }
+.vault-secret-value{
+    display:inline-block;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    background:#f3f4f6;
+    border-radius:6px;
+    padding:2px 8px;
+    margin-right:6px;
+    overflow-wrap:anywhere;
+    white-space:normal;
+    max-width:260px;
+}
+.vault-copy{
+    padding:3px 10px;
+    font-size:12px;
+}
+.vault-nosecret{ color:#9ca3af; }
+.vault-cell-actions{ text-align:right; white-space:nowrap; }
+
+/* Hold-Z reveal: masked value, the in-flight placeholder, and the keep toggle. */
+.vault-secret-mask{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing:2px;
+    color:#9ca3af;
+}
+.vault-secret-loading{ color:#9ca3af; }
+.vault-pin{
+    display:inline-flex;
+    align-items:center;
+    gap:3px;
+    margin-left:8px;
+    font-size:11px;
+    color:#6b7280;
+    vertical-align:middle;
+}
+/* Toolbar: the "hold Z to reveal all" hover zone and the search box. */
+.vault-reveal-all{
+    font-size:12px;
+    color:#6b7280;
+    border:1px dashed #cbd5e1;
+    border-radius:6px;
+    padding:4px 10px;
+    cursor:default;
+    user-select:none;
+}
+.vault-reveal-all:hover{ border-color:#6366f1; color:#4338ca; }
+.vault-search{
+    flex:1;
+    min-width:160px;
+    max-width:320px;
+    padding:5px 10px;
+    border:1px solid #d1d5db;
+    border-radius:6px;
+    font-size:13px;
+}
+.vault-hint{ font-size:12px; color:#6b7280; margin:0 0 12px; }
+.vault-groups{ }
+
+/* Startup Key Vault login overlay. */
+.vault-login-overlay{
+    position:fixed;
+    inset:0;
+    z-index:1000;
+    background:rgba(17,24,39,0.55);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+/* An element rule with `display` overrides the [hidden] UA style, so re-assert it
+   (matches .modal-overlay[hidden]) — otherwise the overlay never hides. */
+.vault-login-overlay[hidden]{ display:none; }
+.vault-login-box{
+    background:#fff;
+    border-radius:12px;
+    padding:28px 32px;
+    width:min(440px, 92vw);
+    box-shadow:0 20px 60px rgba(0,0,0,0.3);
+}
+.vault-login-title{ margin:0 0 14px; font-size:20px; color:#1f2937; }
+.vault-skip{ margin-top:12px; }
+
+/* The read-only Key Vault line on the org card (in the notes area). */
+.org-vault-info{
+    font-size:12px;
+    color:#4b5563;
+    padding-top:8px;
+    border-top:1px dashed color-mix(in srgb, var(--org-color) 30%, #e5e7eb);
+}
+.org-vault-lead{
+    font-weight:600;
+    color:#374151;
+}
+.org-vault-line{
+    color:#6b7280;
+    margin-top:1px;
+}
+.org-card.style-filled .org-vault-info{ border-top-color:rgba(255,255,255,0.45); }
+.org-card.style-filled .org-vault-lead,
+.org-card.style-filled .org-vault-line{ color:rgba(255,255,255,0.92); }
+
+/* Read-only Key Vault block inside the org editor: a boxed, non-editable panel
+   (no per-org colour var here, so neutralize the card's coloured top border). */
+.org-vault-edit{ margin-top:12px; }
+.org-vault-edit .org-vault-info{
+    border:1px solid #e5e7eb;
+    border-radius:6px;
+    padding:8px 10px;
+    background:#f9fafb;
+}

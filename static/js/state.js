@@ -31,3 +31,14 @@ let contactDirectory = [];       // aggregated+resolved contacts, from the last 
 let selectedOrgId = null;        // org whose contacts the directory shows; null = unassigned contacts
 let roleSortRepsOnTop = false;   // org-contact sort: representatives first when true, members first when false
 let showRealOrgNames = false;    // while the "hold to reveal" button/key is held, show real org names instead of display names
+
+let vaultStatus = null;          // last /api/vault/status {available, initialized, unlocked, dpapi_available, remembered}
+let vaultEntries = {};           // org_id -> [redacted entry, ...], currently displayed (full list or search results)
+let vaultOrgNames = {};          // org_id -> display name, for the Key Vaults list + the entry-editor org picker
+let editingVaultEntryId = null;  // vault entry id open in the editor, or null when adding a new one
+let vaultSecrets = {};           // entry_id -> secret, cached after a hold-Z reveal / reveal-all (unlocked only)
+let vaultPinned = {};            // entry_id -> true: pinned visible via the per-key checkbox (survives Z release)
+let vaultSearch = "";            // current Password Manager search query (key value / org / datetime)
+let vaultZHeld = false;          // hold-Z reveal active in the Workshop view
+let vaultRevealAll = false;      // hovering the "reveal all" area (reveals every key while Z held)
+let vaultHoverId = null;         // entry id whose row is currently hovered (single-key hold-Z reveal)

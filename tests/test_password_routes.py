@@ -15,6 +15,9 @@ _ISOLATED = (
     "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
     "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "COMPOSE_TEMPLATES_FILE",
     "PASSWORD_SETTINGS_FILE",
+    # The scan route now touches the vault store (auto-capture); isolate its files
+    # so a locked-vault scan can never read or write the real vault on disk.
+    "VAULT_FILE", "VAULT_INDEX_FILE", "VAULT_KEY_DPAPI_FILE",
 )
 
 
