@@ -5,7 +5,7 @@ import io
 import json
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 
 from flask import (
@@ -48,7 +48,12 @@ def resolve_org_id(customer_store, email):
 
 def capture_scanned_passwords(store, vault_store, customer_store):
     """Record the latest scan's detected passwords into the unlocked vault (sender's
-    org, or the Unassigned bucket). Idempotent; returns how many were captured."""
+    org, or the Unassigned bucket). Idempotent; returns how many **genuinely new**
+    keys were added (a re-detected password that dedups onto an existing key does not
+    count).
+
+    A captured key is stamped with the source mail's received datetime (not the scan
+    time), so its ``scan_dt`` reflects when the password actually arrived."""
     captured = 0
     for mail in store.snapshot():
         secrets = mail.get("_passwords") or []
@@ -56,22 +61,42 @@ def capture_scanned_passwords(store, vault_store, customer_store):
             continue
         email = mail.get("sender_email") or ""
         org_id = resolve_org_id(customer_store, email) or config.VAULT_UNASSIGNED_ORG_ID
+        received = mail.get("received")
         for secret in secrets:
-            if vault_store.capture_scan(org_id, secret, source_email=email) is not None:
+            _entry, created = vault_store.capture_scan(
+                org_id, secret, scan_dt=received, source_email=email)
+            if created:
                 captured += 1
     return captured
 
 
-def run_password_scan(store, password_settings, vault_store, customer_store):
-    """Compile patterns, scan every cached mail, record hits, and (while the vault is
+def run_password_scan(store, password_settings, vault_store, customer_store,
+                      experimental_store):
+    """Compile patterns, scan recent cached mail, record hits, and (while the vault is
     unlocked) auto-capture them. Shared by POST /api/passwords/scan, the on-unlock
-    auto-scan, and the post-refresh hook. Returns the JSON-able result dict."""
+    auto-scan, and the post-refresh hook. Returns the JSON-able result dict.
+
+    No-op when the Smart Password Detection experimental feature is off (the scan must
+    not run at all then), and only scans mail received within
+    ``config.PASSWORD_SCAN_MAX_AGE_DAYS`` — older mail is left unscanned/uncaptured."""
+    if not experimental_store.snapshot().get("passwords"):
+        return {
+            "scanned": 0, "flagged": 0, "pattern_errors": [],
+            "vault_captured": 0, "vault_pending": 0,
+            "vault_locked": not vault_store.is_unlocked(), "skipped": True,
+        }
     snap = password_settings.snapshot()
     compiled, errors = password_detect.compile_patterns(snap["patterns"])
     rules = snap["rules"]
+    cutoff = datetime.now() - timedelta(days=config.PASSWORD_SCAN_MAX_AGE_DAYS)
     mails = store.snapshot()
     matches = {}
+    scanned = 0
     for mail in mails:
+        received = mail.get("_received_dt")
+        if received is not None and received < cutoff:
+            continue                                  # older than the scan window
+        scanned += 1
         text = "\n".join([mail.get("subject", ""), mail.get("body", "")])
         found = password_detect.scan_text(
             text, compiled, rules, config.PASSWORD_MAX_MATCHES_PER_MAIL)
@@ -81,8 +106,14 @@ def run_password_scan(store, password_settings, vault_store, customer_store):
     unlocked = vault_store.is_unlocked()
     captured = capture_scanned_passwords(store, vault_store, customer_store) if unlocked else 0
     pending = 0 if unlocked else sum(len(v) for v in matches.values())
+    if unlocked:
+        log.info("SDS scan: %d mail(s) scanned, %d flagged, %d new key(s) captured",
+                 scanned, flagged, captured)
+    else:
+        log.info("SDS scan: %d mail(s) scanned, %d flagged, %d key(s) pending "
+                 "(vault locked)", scanned, flagged, pending)
     return {
-        "scanned": len(mails),
+        "scanned": scanned,
         "flagged": flagged,
         "pattern_errors": [{"component": n, "error": e} for n, e in errors],
         "vault_captured": captured,
@@ -91,12 +122,14 @@ def run_password_scan(store, password_settings, vault_store, customer_store):
     }
 
 
-def refresh_then_scan(store, password_settings, vault_store, customer_store):
+def refresh_then_scan(store, password_settings, vault_store, customer_store,
+                      experimental_store):
     """Refresh callback for the scheduler and POST /refresh: fetch + sync mail from
     Outlook, then run an SDS scan so badges/captures reflect newly-arrived mail. The
     scan is read-only against the mailbox and only writes the vault when unlocked."""
     outlook.refresh(store)
-    run_password_scan(store, password_settings, vault_store, customer_store)
+    run_password_scan(store, password_settings, vault_store, customer_store,
+                      experimental_store)
 
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
@@ -126,15 +159,20 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         _capture_scanned_to_vault()
 
     def _vault_org_names():
-        """`{org_id: display name}` for vault grouping/search, plus the Unassigned
-        bucket label — built here so `vault_store` needs no customer-store import."""
+        """`{org_id: searchable name text}` for vault search, plus the Unassigned
+        bucket label — built here so `vault_store` needs no customer-store import. The
+        text combines the org's official `name` and its `display_name` so a key search
+        matches either (the official name stays findable even when a display name is
+        set)."""
         names = {config.VAULT_UNASSIGNED_ORG_ID: "Unassigned"}
         for org in customer_store.snapshot():
-            names[org["id"]] = (org.get("display_name") or "").strip() or org.get("name", "")
+            parts = [org.get("name", ""), org.get("display_name", "")]
+            names[org["id"]] = " ".join(p.strip() for p in parts if p and p.strip())
         return names
 
     def _run_password_scan():
-        return run_password_scan(store, password_settings, vault_store, customer_store)
+        return run_password_scan(store, password_settings, vault_store, customer_store,
+                                 experimental_store)
 
     def _on_vault_unlocked():
         """After a successful create/unlock: re-home parked captures, then auto-scan
@@ -218,7 +256,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         # Fetch + sync, then run the SDS scan so badges/captures reflect new mail.
         threading.Thread(
             target=refresh_then_scan,
-            args=(store, password_settings, vault_store, customer_store),
+            args=(store, password_settings, vault_store, customer_store,
+                  experimental_store),
             daemon=True,
         ).start()
         return jsonify({"status": "started"})

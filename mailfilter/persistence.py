@@ -8,10 +8,9 @@ algorithm so a caller can migrate to a stronger one (see ``MailStore.load``).
 
 import json
 import logging
-import os
 from pathlib import Path
 
-from . import crypto
+from . import crypto, util
 
 log = logging.getLogger(__name__)
 
@@ -39,4 +38,4 @@ def save_encoded(cache_file, obj):
     temp_file = path.with_name(path.name + ".tmp")
     with open(temp_file, "wb") as f:
         f.write(crypto.encode(payload))
-    os.replace(temp_file, path)
+    util.atomic_replace(temp_file, path)

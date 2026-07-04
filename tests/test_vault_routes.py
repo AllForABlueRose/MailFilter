@@ -6,11 +6,16 @@ are never touched. Skipped wholesale when `cryptography` is absent."""
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
 from mailfilter import create_app, vault_crypto
 from tests.factories import make_mail
+
+
+def _recent(days_ago=0):
+    return (datetime.now() - timedelta(days=days_ago)).strftime(config.RECEIVED_FORMAT)
 
 _ISOLATED = (
     "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
@@ -28,6 +33,9 @@ class VaultRouteTests(unittest.TestCase):
         for name in _ISOLATED:
             setattr(config, name, Path(self._tmpdir) / name.lower())
         self.app = create_app()
+        # Smart Password Detection is experimental-gated: enable it so the scan +
+        # capture path runs (req 1 makes it a no-op while the feature is off).
+        self.app.extensions["experimental_store"].update({"passwords": True})
         self.client = self.app.test_client()
         self.org = self.client.post("/api/organizations", json={"name": "Acme"}).get_json()
 
@@ -39,12 +47,14 @@ class VaultRouteTests(unittest.TestCase):
     def _init(self):
         return self.client.post("/api/vault/init", json={"passphrase": "passphrase1"})
 
-    def _seed_mail(self, sender_email):
+    def _seed_mail(self, sender_email, received=None):
         """One cached mail from ``sender_email`` whose body holds a detectable
-        password (matches the seeded default patterns / rules)."""
+        password (matches the seeded default patterns / rules). Defaults to a
+        recent received date so the captured temporary key isn't age-hidden."""
         self.app.extensions["mail_store"].add_mails([
             make_mail(id="P", subject="creds", sender_email=sender_email,
-                      attachments=[], body="Hello,\nPassword:\n Hunter2xZ\nRegards"),
+                      received=received or _recent(), attachments=[],
+                      body="Hello,\nPassword:\n Hunter2xZ\nRegards"),
         ])
 
     def test_status_progression(self):
@@ -94,6 +104,31 @@ class VaultRouteTests(unittest.TestCase):
         org_keys = entries[self.org["id"]]
         self.assertEqual(org_keys[0]["kind"], "temporary")
         self.assertEqual(org_keys[0]["source_email"], "bob@acme.com")
+
+    def test_rescan_reports_only_genuinely_new_captures(self):
+        # Req 5: vault_captured counts brand-new keys, not re-detected ones.
+        self._init()
+        self.client.post(f"/api/organizations/{self.org['id']}/domains",
+                         json={"domain": "acme.com", "role": "member"})
+        self._seed_mail("bob@acme.com")
+        first = self.client.post("/api/passwords/scan").get_json()
+        self.assertEqual(first["vault_captured"], 1)          # new key
+        second = self.client.post("/api/passwords/scan").get_json()
+        self.assertEqual(second["flagged"], 1)                # still detected
+        self.assertEqual(second["vault_captured"], 0)         # but nothing new
+
+    def test_scan_no_op_and_no_capture_when_feature_disabled(self):
+        # Req 1: with the feature off the scan skips entirely and captures nothing.
+        self._init()
+        self.app.extensions["experimental_store"].update({"passwords": False})
+        self.client.post(f"/api/organizations/{self.org['id']}/domains",
+                         json={"domain": "acme.com", "role": "member"})
+        self._seed_mail("bob@acme.com")
+        scan = self.client.post("/api/passwords/scan").get_json()
+        self.assertTrue(scan.get("skipped"))
+        self.assertEqual(scan["vault_captured"], 0)
+        entries = self.client.get("/api/vault/entries").get_json()["entries"]
+        self.assertNotIn(self.org["id"], entries)
 
     def test_scan_parks_unresolved_sender_under_unassigned(self):
         self._init()
@@ -174,15 +209,57 @@ class VaultRouteTests(unittest.TestCase):
         orig = outlook.refresh
         outlook.refresh = lambda s: s.add_mails([make_mail(
             id="P", subject="creds", sender_email="bob@acme.com",
-            attachments=[], body="Hello,\nPassword:\n Hunter2xZ\nRegards")])
+            received=_recent(), attachments=[],
+            body="Hello,\nPassword:\n Hunter2xZ\nRegards")])
         try:
             routes.refresh_then_scan(
                 store, self.app.extensions["password_settings_store"],
-                self.app.extensions["vault_store"], self.app.extensions["customer_store"])
+                self.app.extensions["vault_store"], self.app.extensions["customer_store"],
+                self.app.extensions["experimental_store"])
         finally:
             outlook.refresh = orig
         entries = self.client.get("/api/vault/entries").get_json()["entries"]
         self.assertEqual(entries[self.org["id"]][0]["source_email"], "bob@acme.com")
+
+    def test_search_matches_official_name_even_with_display_name(self):
+        self._init()
+        org2 = self.client.post("/api/organizations",
+                                json={"name": "Globex Corporation",
+                                      "display_name": "GBX"}).get_json()
+        self.client.post("/api/vault/entries", json={
+            "org_id": org2["id"], "label": "P", "secret": "s3cr3t"})
+        # The official name is searchable even though a display name is set...
+        by_official = self.client.post("/api/vault/search",
+                                       json={"query": "Globex"}).get_json()["entries"]
+        self.assertIn(org2["id"], by_official)
+        # ...and so is the display name.
+        by_display = self.client.post("/api/vault/search",
+                                      json={"query": "GBX"}).get_json()["entries"]
+        self.assertIn(org2["id"], by_display)
+
+    def test_scan_stamps_capture_with_mail_received_date(self):
+        self._init()
+        self.client.post(f"/api/organizations/{self.org['id']}/domains",
+                         json={"domain": "acme.com", "role": "member"})
+        received = _recent(days_ago=2)
+        self._seed_mail("bob@acme.com", received=received)
+        self.client.post("/api/passwords/scan")
+        entries = self.client.get("/api/vault/entries").get_json()["entries"]
+        self.assertEqual(entries[self.org["id"]][0]["scan_dt"], received)
+
+    def test_aged_capture_hidden_from_list_but_counted_in_index(self):
+        self._init()
+        self.client.post(f"/api/organizations/{self.org['id']}/domains",
+                         json={"domain": "acme.com", "role": "member"})
+        # A password from mail older than the hide window is captured but hidden.
+        self._seed_mail("bob@acme.com",
+                        received=_recent(days_ago=config.VAULT_TEMP_HIDE_AFTER_DAYS + 3))
+        scan = self.client.post("/api/passwords/scan").get_json()
+        self.assertEqual(scan["vault_captured"], 1)               # captured...
+        entries = self.client.get("/api/vault/entries").get_json()["entries"]
+        self.assertNotIn(self.org["id"], entries)                 # ...but hidden
+        org = self.client.get("/api/organizations").get_json()["organizations"][0]
+        self.assertEqual(org["vault"]["count"], 1)                # still on record
 
     def test_org_listing_carries_nonsecret_vault_index(self):
         self._init()

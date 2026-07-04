@@ -23,7 +23,7 @@ util, config``. It never imports the customer store; the org id is just a key.
 import logging
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
@@ -47,6 +47,14 @@ def _stamp():
 
 def _clip(value, cap):
     return str(value or "").strip()[:cap]
+
+
+def _parse_dt(value):
+    """A ``RECEIVED_FORMAT`` datetime string as a ``datetime``, or ``None``."""
+    try:
+        return datetime.strptime(value, config.RECEIVED_FORMAT)
+    except (ValueError, TypeError):
+        return None
 
 
 class VaultStore:
@@ -176,7 +184,9 @@ class VaultStore:
             self._require_unlocked()
             out = {}
             for org_id, items in self._data["entries"].items():
-                out[org_id] = [self._public(e) for e in items]
+                ordered = self._ordered(self._visible(items))
+                if ordered:
+                    out[org_id] = [self._public(e) for e in ordered]
             return out
 
     def add_entry(self, org_id, fields):
@@ -260,9 +270,9 @@ class VaultStore:
             out = {}
             for org_id, items in self._data["entries"].items():
                 name = str(org_names.get(org_id, "")).lower()
-                hits = [self._public(e) for e in items if self._matches(e, q, name)]
-                if hits:
-                    out[org_id] = hits
+                matched = [e for e in self._visible(items) if self._matches(e, q, name)]
+                if matched:
+                    out[org_id] = [self._public(e) for e in self._ordered(matched)]
             return out
 
     @staticmethod
@@ -282,24 +292,37 @@ class VaultStore:
         Management assignment can re-home an :data:`config.VAULT_UNASSIGNED_ORG_ID`
         capture to the org that sender then resolves to (see :meth:`rehome_unassigned`).
         Deduplicated by secret within the org so re-scanning does not pile up
-        copies. Returns the public entry (existing or new), or ``None``.
+        copies. When a newer mail re-records a secret already stored as a temporary
+        key, the entry's ``scan_dt`` is advanced to the newer datetime (never rolled
+        back) so an aged, hidden key becomes visible again (see :meth:`_visible`).
+        Returns ``(public_entry_or_None, created)``: ``created`` is ``True`` only when
+        a **brand-new** key was added — ``False`` on a dedup hit (including a scan_dt
+        refresh), so callers can report genuinely-new captures rather than re-hits.
         """
         with self._lock:
             self._require_unlocked()
             org_id = _clip(org_id, 64)
             secret = _clip(secret, config.VAULT_SECRET_MAX)
             if not org_id or not secret:
-                return None
+                return None, False
             for entry in self._data["entries"].get(org_id, []):
                 if entry.get("secret") == secret:
-                    return self._public(entry)
-            return self.add_entry(org_id, {
+                    if entry.get("kind") == "temporary":
+                        new_dt = _clip(scan_dt or _stamp(), 32)
+                        if new_dt > (entry.get("scan_dt") or ""):
+                            entry["scan_dt"] = new_dt
+                            entry["updated"] = _stamp()
+                            self._save_vault()
+                            self._save_index()
+                    return self._public(entry), False
+            added = self.add_entry(org_id, {
                 "label": label or "Detected password",
                 "secret": secret,
                 "kind": "temporary",
                 "scan_dt": scan_dt or _stamp(),
                 "source_email": source_email,
             })
+            return added, added is not None
 
     def rehome_unassigned(self, resolver):
         """Move captures parked under :data:`config.VAULT_UNASSIGNED_ORG_ID` to the
@@ -445,6 +468,41 @@ class VaultStore:
                 if entry["id"] == entry_id:
                     return org_id, entry
         return None
+
+    @staticmethod
+    def _visible(items):
+        """``items`` minus temporary keys older than the hide window.
+
+        A temporary key whose ``scan_dt`` parses older than
+        ``config.VAULT_TEMP_HIDE_AFTER_DAYS`` is omitted from the list/search views
+        (still stored — :meth:`capture_scan` re-shows it when a newer mail records the
+        same secret). Managed keys, and temporary keys with a missing/unparseable
+        ``scan_dt``, are always kept.
+        """
+        cutoff = _now() - timedelta(days=config.VAULT_TEMP_HIDE_AFTER_DAYS)
+        visible = []
+        for e in items:
+            if e.get("kind") == "temporary":
+                dt = _parse_dt(e.get("scan_dt"))
+                if dt is not None and dt < cutoff:
+                    continue
+            visible.append(e)
+        return visible
+
+    @staticmethod
+    def _ordered(items):
+        """Managed keys first, then temporary; each group newest datetime first.
+
+        Two stable passes: sort by the entry's datetime descending (``created`` for
+        managed, ``scan_dt`` for temporary), then by kind so managed sorts ahead. The
+        stable sort preserves the datetime order within each kind.
+        """
+        def dt_key(e):
+            return (e.get("created", "") if e.get("kind") == "managed"
+                    else e.get("scan_dt", "")) or ""
+        ordered = sorted(items, key=dt_key, reverse=True)
+        ordered.sort(key=lambda e: 0 if e.get("kind") == "managed" else 1)
+        return ordered
 
     def _compute_index(self):
         index = {}

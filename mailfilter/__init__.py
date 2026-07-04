@@ -105,7 +105,7 @@ def create_app():
     # captures into the vault only while it is unlocked).
     app.extensions["mail_scheduler"] = RefreshScheduler(
         config.REFRESH_INTERVAL_SECONDS,
-        lambda: refresh_then_scan(store, password_settings, vault, customers),
+        lambda: refresh_then_scan(store, password_settings, vault, customers, experimental),
     )
     # Ticks every AUTOMATION_TICK_SECONDS and runs each enabled automation whose
     # interval has elapsed. Like mail_scheduler, the entry point owns start().

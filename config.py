@@ -53,6 +53,13 @@ CUSTOMER_MATCH_FILE = BASE_DIR / "customer_match_cache.json"
 EXPERIMENTAL_FILE = BASE_DIR / "experimental_cache.json"
 RECEIVED_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# Atomic-write reliability. On Windows os.replace() can intermittently fail with
+# PermissionError/WinError 5 when an external process (Defender / Search Indexer)
+# briefly holds a handle to a freshly-created file, so the temp -> final rename is
+# retried a few times before giving up. Applies to every encoded-at-rest write.
+FILE_REPLACE_RETRIES = 5
+FILE_REPLACE_DELAY_SECONDS = 0.1
+
 # Key Vault (Workshop view). Per-organization credential storage, protected far
 # more strongly than the other caches: the file is sealed with AES-256-GCM under
 # a key derived from a user **master passphrase** via scrypt, so it is useless
@@ -91,6 +98,10 @@ VAULT_UNASSIGNED_ORG_ID = "unassigned"
 # Idle auto-lock: an unlocked vault re-locks after this many seconds without a
 # successful access, so a walked-away session does not leave secrets reachable.
 VAULT_LOCK_TIMEOUT_SECONDS = 900
+# Temporary (SDS-captured) keys older than this many days are hidden from the vault
+# list and search — the record is kept, just not shown until a newer mail re-records
+# the same secret and refreshes its scan datetime. Managed keys are never hidden.
+VAULT_TEMP_HIDE_AFTER_DAYS = 7
 
 # Outlook
 OUTLOOK_INBOX_FOLDER = 6  # olFolderInbox
@@ -283,6 +294,9 @@ PASSWORD_TEMPLATE_MAX = 500       # the context box (literal text + placeholder)
 PASSWORD_VALUE_REGEX_MAX = 500    # the optional per-pattern value regex
 PASSWORD_MAX_PATTERNS = 50
 PASSWORD_MAX_MATCHES_PER_MAIL = 20
+# A scan only inspects mail received within this many days of today ("up to one
+# month"); older mail is left unscanned and uncaptured.
+PASSWORD_SCAN_MAX_AGE_DAYS = 30
 
 # Experimental features. The known feature ids and their default enablement (all
 # off, so the sidebar box starts empty). Enabling a feature mounts its control in

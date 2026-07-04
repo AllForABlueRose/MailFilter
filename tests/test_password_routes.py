@@ -5,6 +5,7 @@ against throwaway caches, so the real caches and Outlook are never touched."""
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
@@ -14,11 +15,15 @@ from tests.factories import make_mail
 _ISOLATED = (
     "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
     "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "COMPOSE_TEMPLATES_FILE",
-    "PASSWORD_SETTINGS_FILE",
+    "PASSWORD_SETTINGS_FILE", "EXPERIMENTAL_FILE",
     # The scan route now touches the vault store (auto-capture); isolate its files
     # so a locked-vault scan can never read or write the real vault on disk.
     "VAULT_FILE", "VAULT_INDEX_FILE", "VAULT_KEY_DPAPI_FILE",
 )
+
+
+def _recent(days_ago=0):
+    return (datetime.now() - timedelta(days=days_ago)).strftime(config.RECEIVED_FORMAT)
 
 
 class PasswordRouteTests(unittest.TestCase):
@@ -28,11 +33,14 @@ class PasswordRouteTests(unittest.TestCase):
         for name in _ISOLATED:
             setattr(config, name, Path(self._tmpdir) / name.lower())
         self.app = create_app()
+        # Smart Password Detection is experimental-gated: the scan no-ops unless the
+        # feature is enabled. Turn it on so the scan tests exercise the real path.
+        self.app.extensions["experimental_store"].update({"passwords": True})
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
-            make_mail(id="P", subject="creds", attachments=[],
+            make_mail(id="P", subject="creds", received=_recent(1), attachments=[],
                       body="Hello,\nPassword:\n Hunter2xZ\nRegards"),
-            make_mail(id="N", subject="newsletter", attachments=[],
+            make_mail(id="N", subject="newsletter", received=_recent(1), attachments=[],
                       body="Nothing sensitive here at all."),
         ])
         self.client = self.app.test_client()
@@ -77,6 +85,31 @@ class PasswordRouteTests(unittest.TestCase):
         # Tighten min_length so the 9-char password no longer qualifies.
         self.client.post("/api/password-settings", json={"rules": {"min_length": 20}})
         self.assertEqual(self.client.post("/api/passwords/scan").get_json()["flagged"], 0)
+
+    def test_scan_skipped_when_feature_disabled(self):
+        # Req 1: with the experimental feature off, the scan must not run at all.
+        self.app.extensions["experimental_store"].update({"passwords": False})
+        scan = self.client.post("/api/passwords/scan").get_json()
+        self.assertEqual(scan["scanned"], 0)
+        self.assertEqual(scan["flagged"], 0)
+        self.assertTrue(scan.get("skipped"))
+        # The badge data is untouched — nothing was flagged.
+        allm = {m["id"]: m for m in self.client.get("/api/mail").get_json()["mails"]}
+        self.assertFalse(allm["P"]["has_password"])
+
+    def test_scan_excludes_mail_older_than_window(self):
+        # Req 6: only mail within PASSWORD_SCAN_MAX_AGE_DAYS is scanned.
+        self.store.add_mails([
+            make_mail(id="OLD", subject="old creds",
+                      received=_recent(config.PASSWORD_SCAN_MAX_AGE_DAYS + 5),
+                      attachments=[], body="Hello,\nPassword:\n Hunter2xZ\nRegards"),
+        ])
+        scan = self.client.post("/api/passwords/scan").get_json()
+        # P (recent) is in-window and flagged; OLD is excluded; N has no password.
+        self.assertEqual(scan["scanned"], 2)              # P + N, not OLD
+        self.assertEqual(scan["flagged"], 1)              # only P
+        allm = {m["id"]: m for m in self.client.get("/api/mail").get_json()["mails"]}
+        self.assertFalse(allm["OLD"]["has_password"])
 
     def test_scan_reports_bad_pattern_by_number(self):
         # A component with no <{(password_value)}> marker can't be compiled; it is

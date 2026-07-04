@@ -48,6 +48,7 @@ async function loadVault(){
     } else {
         // Locked: drop every cached secret and any reveal/pin state.
         vaultEntries = {}; vaultSecrets = {}; vaultPinned = {}; vaultSearch = "";
+        vaultRevealAll = false; vaultRevealAllPinned = false; vaultHoverId = null;
         renderVaultPanel();
     }
 }
@@ -118,18 +119,28 @@ function buildUnlockedView(){
     add.type = "button"; add.onclick = () => openVaultEntry(null, null);
     bar.appendChild(add);
 
-    // Hold-Z over this area reveals every key's value at once.
-    const revealAll = el("div", "vault-reveal-all", "👁 hold Z to reveal all");
-    revealAll.title = "Hold Z and hover here to reveal every key's value";
+    // Hovering this area reveals every key's value at once; its checkbox (shown on
+    // hover) keeps them revealed for the session.
+    const revealAll = el("div", "vault-reveal-all");
+    revealAll.title = "Hover here to reveal every key's value";
+    revealAll.appendChild(el("span", "vault-reveal-all-label", "👁 hover to reveal all"));
+    const pinAll = el("label", "vault-reveal-all-pin");
+    const pinAllCb = el("input"); pinAllCb.type = "checkbox"; pinAllCb.checked = vaultRevealAllPinned;
+    pinAllCb.title = "Keep every key visible";
+    pinAllCb.onchange = () => { vaultRevealAllPinned = pinAllCb.checked; if(vaultRevealAllPinned) ensureAllSecrets(); updateAllSecretCells(); };
+    pinAll.append(pinAllCb, document.createTextNode(" keep all"));
+    revealAll.appendChild(pinAll);
     revealAll.addEventListener("mouseenter", () => {
+        blurVaultSearch();
         vaultRevealAll = true;
-        if(vaultZHeld) ensureAllSecrets();
+        ensureAllSecrets();
         updateAllSecretCells();
     });
     revealAll.addEventListener("mouseleave", () => { vaultRevealAll = false; updateAllSecretCells(); });
     bar.appendChild(revealAll);
 
     const search = el("input", "vault-search");
+    search.id = "vaultSearchInput";
     search.type = "search"; search.placeholder = "Search value, organization, date…";
     search.value = vaultSearch;
     search.addEventListener("input", () => onVaultSearch(search.value));
@@ -149,7 +160,7 @@ function buildUnlockedView(){
     wrap.appendChild(bar);
 
     wrap.appendChild(el("p", "vault-hint",
-        "Hold Z and hover a key to reveal it; tick its box to keep it visible."));
+        "Hover a key to reveal it; tick its box to keep it visible."));
 
     // A stable container so a search re-render doesn't rebuild (and unfocus) the bar.
     const groups = el("div", "vault-groups"); groups.id = "vaultGroups";
@@ -193,14 +204,16 @@ function buildOrgGroup(orgId){
 
 function buildEntryRow(entry){
     const tr = el("tr", "vault-row");
-    // Hold-Z while hovering a row reveals just that key.
+    // Hovering a row reveals just that key (the vault is already unlocked); moving
+    // onto a key also drops focus out of the search box (req: auto-escape search).
     tr.addEventListener("mouseenter", () => {
+        blurVaultSearch();
         vaultHoverId = entry.id;
-        if(vaultZHeld) updateSecretCell(entry.id);
+        updateSecretCell(entry.id);
     });
     tr.addEventListener("mouseleave", () => {
         if(vaultHoverId === entry.id) vaultHoverId = null;
-        if(vaultZHeld) updateSecretCell(entry.id);
+        updateSecretCell(entry.id);
     });
 
     const label = el("td", "vault-cell-label");
@@ -222,7 +235,7 @@ function buildEntryRow(entry){
     const user = el("td", "vault-cell-user", entry.username || "—");
     tr.appendChild(user);
 
-    // Secret cell: masked by default; the value is revealed only while held with Z
+    // Secret cell: masked by default; the value is revealed while the row is hovered
     // (or pinned). Its id lets the reveal handlers refresh just this cell.
     const secretCell = el("td", "vault-cell-secret");
     secretCell.id = "vaultSecret-" + entry.id;
@@ -238,12 +251,20 @@ function buildEntryRow(entry){
     return tr;
 }
 
-// ----- hold-Z reveal -----
+// ----- hover reveal -----
 
-// Is this key's value currently shown? Pinned keys stay shown; otherwise the value
-// shows only while Z is held and the row (or the reveal-all area) is hovered.
+// Is this key's value currently shown? A key is shown when it (or "reveal all") is
+// pinned for the session, or while its row / the reveal-all area is hovered. The
+// vault being unlocked is a precondition of the whole panel being rendered.
 function secretShown(id){
-    return !!vaultPinned[id] || (vaultZHeld && (vaultRevealAll || vaultHoverId === id));
+    return !!vaultPinned[id] || vaultRevealAllPinned || vaultRevealAll || vaultHoverId === id;
+}
+
+// Drop keyboard focus out of the search box when the mouse moves onto a key or the
+// reveal-all area, so hovering to reveal doesn't fight the search field for focus.
+function blurVaultSearch(){
+    const input = document.getElementById("vaultSearchInput");
+    if(input && document.activeElement === input) input.blur();
 }
 
 function findVaultEntry(id){
@@ -272,7 +293,7 @@ function renderSecretCell(cell, entry){
         copy.type = "button"; copy.onclick = () => copyText(secret, copy);
         cell.appendChild(copy);
     }
-    // The "keep visible" toggle (pins past Z release).
+    // The "keep visible" toggle: keeps the value shown after the mouse leaves.
     const pin = el("label", "vault-pin");
     const cb = el("input"); cb.type = "checkbox"; cb.checked = !!vaultPinned[id];
     cb.title = "Keep this key visible";
@@ -309,25 +330,17 @@ async function ensureAllSecrets(){
     if(res.ok && res.json){ Object.assign(vaultSecrets, res.json.secrets || {}); updateAllSecretCells(); }
 }
 
-// Wires the Workshop hold-Z reveal (mirrors Customer Management's org-name reveal,
-// scoped to the Workshop view so the two never fight over the Z key).
+// Reveal is now hover-driven (no key to hold), so this only guards against secrets
+// lingering visible: when the window loses focus, clear the session reveal/pin state
+// and re-mask every cell. Called once from main.js::init.
 function initVaultReveal(){
-    const inField = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-    const active = () => {
-        const v = document.getElementById("view-workshop");
-        return v && !v.classList.contains("view-hidden");
-    };
-    document.addEventListener("keydown", (e) => {
-        if(e.code !== "KeyZ" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-        if(!active() || inField(e.target)) return;
-        vaultZHeld = true;
-        if(vaultRevealAll) ensureAllSecrets();
+    window.addEventListener("blur", () => {
+        vaultRevealAll = false;
+        vaultRevealAllPinned = false;
+        vaultPinned = {};
+        vaultHoverId = null;
         updateAllSecretCells();
     });
-    document.addEventListener("keyup", (e) => {
-        if(e.code === "KeyZ"){ vaultZHeld = false; updateAllSecretCells(); }
-    });
-    window.addEventListener("blur", () => { vaultZHeld = false; updateAllSecretCells(); });
 }
 
 // ----- search -----
@@ -423,6 +436,7 @@ function skipButton(text){
 async function lockVault(){
     await vaultApi("/api/vault/lock", "POST");
     vaultSecrets = {}; vaultPinned = {}; vaultSearch = "";
+    vaultRevealAll = false; vaultRevealAllPinned = false; vaultHoverId = null;
     await loadVault();
 }
 

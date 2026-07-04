@@ -2,8 +2,10 @@
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import config
 from mailfilter import vault_crypto
 from mailfilter.vault_store import VaultLocked, VaultStore
 
@@ -11,6 +13,13 @@ from mailfilter.vault_store import VaultLocked, VaultStore
 def _store():
     d = Path(tempfile.mkdtemp())
     return VaultStore(d / "vault.json", d / "index.json", d / "key.dpapi")
+
+
+def _dt(days_ago=0, hours_ago=0):
+    """A RECEIVED_FORMAT datetime string relative to now (keeps age-based tests
+    stable regardless of when they run — see VAULT_TEMP_HIDE_AFTER_DAYS)."""
+    return (datetime.now() - timedelta(days=days_ago, hours=hours_ago)).strftime(
+        config.RECEIVED_FORMAT)
 
 
 @unittest.skipUnless(vault_crypto.is_available(), "cryptography not installed")
@@ -100,18 +109,22 @@ class CaptureAndIndexTests(unittest.TestCase):
         self.v.init("passphrase1")
 
     def test_capture_adds_temporary_key(self):
-        pub = self.v.capture_scan("org-1", "leaked", "From mail", "2026-06-28 10:00:00")
+        pub, created = self.v.capture_scan("org-1", "leaked", "From mail", _dt(days_ago=1))
+        self.assertTrue(created)                          # brand-new key
         self.assertEqual(pub["kind"], "temporary")
-        self.assertEqual(pub["scan_dt"], "2026-06-28 10:00:00")
+        self.assertEqual(pub["scan_dt"], _dt(days_ago=1))
 
     def test_capture_dedupes_same_secret(self):
-        a = self.v.capture_scan("org-1", "leaked", scan_dt="2026-06-28 10:00:00")
-        b = self.v.capture_scan("org-1", "leaked", scan_dt="2026-06-29 10:00:00")
+        a, a_created = self.v.capture_scan("org-1", "leaked", scan_dt=_dt(days_ago=3))
+        b, b_created = self.v.capture_scan("org-1", "leaked", scan_dt=_dt(days_ago=2))
+        self.assertTrue(a_created)                        # first is new
+        self.assertFalse(b_created)                       # re-capture is not new
         self.assertEqual(a["id"], b["id"])               # same entry, not a duplicate
         self.assertEqual(len(self.v.entries_by_org()["org-1"]), 1)
 
     def test_capture_stores_source_email(self):
-        pub = self.v.capture_scan("org-1", "leaked", source_email="bob@acme.com")
+        pub, created = self.v.capture_scan("org-1", "leaked", source_email="bob@acme.com")
+        self.assertTrue(created)
         self.assertEqual(pub["source_email"], "bob@acme.com")
 
     def test_rehome_unassigned_moves_to_resolved_org(self):
@@ -164,8 +177,9 @@ class CaptureAndIndexTests(unittest.TestCase):
         self.assertIn("org-2", self.v.search("beta", names))  # by org display name
 
     def test_search_matches_datetime_and_blank_returns_all(self):
-        self.v.capture_scan("org-1", "leaked", scan_dt="2026-06-28 10:00:00", source_email="a@b.com")
-        self.assertIn("org-1", self.v.search("2026-06-28", {}))
+        day = _dt(days_ago=2)
+        self.v.capture_scan("org-1", "leaked", scan_dt=day, source_email="a@b.com")
+        self.assertIn("org-1", self.v.search(day[:10], {}))   # date portion
         self.assertIn("org-1", self.v.search("", {}))
 
     def test_index_reflects_kinds_and_is_readable_while_locked(self):
@@ -181,6 +195,55 @@ class CaptureAndIndexTests(unittest.TestCase):
         locked_idx = self.v.index()
         self.assertEqual(locked_idx["org-1"]["count"], 2)
         self.assertNotIn("secret", str(locked_idx))
+
+
+@unittest.skipUnless(vault_crypto.is_available(), "cryptography not installed")
+class VisibilityOrderingTests(unittest.TestCase):
+    """Temporary-key age hiding, re-record refresh, and managed-first ordering."""
+
+    def setUp(self):
+        self.v = _store()
+        self.v.init("passphrase1")
+
+    def test_capture_refreshes_scan_dt_on_newer_rerecord(self):
+        self.v.capture_scan("org-1", "leaked", scan_dt=_dt(days_ago=3))
+        newer = _dt(days_ago=1)
+        _entry, created = self.v.capture_scan("org-1", "leaked", scan_dt=newer)
+        self.assertFalse(created)                         # a refresh is not a new key
+        self.assertEqual(self.v.entries_by_org()["org-1"][0]["scan_dt"], newer)
+
+    def test_older_rerecord_does_not_roll_back(self):
+        newer = _dt(days_ago=1)
+        self.v.capture_scan("org-1", "leaked", scan_dt=newer)
+        self.v.capture_scan("org-1", "leaked", scan_dt=_dt(days_ago=5))
+        self.assertEqual(self.v.entries_by_org()["org-1"][0]["scan_dt"], newer)
+
+    def test_aged_temporary_hidden_from_list_and_search_but_recorded(self):
+        aged = _dt(days_ago=config.VAULT_TEMP_HIDE_AFTER_DAYS + 2)
+        self.v.capture_scan("org-1", "leaked", scan_dt=aged, source_email="a@b.com")
+        self.assertNotIn("org-1", self.v.entries_by_org())      # hidden from the list
+        self.assertNotIn("org-1", self.v.search("leaked", {}))  # and from search
+        self.assertEqual(self.v.index()["org-1"]["count"], 1)   # still on record
+
+    def test_rerecord_unhides_an_aged_key(self):
+        self.v.capture_scan("org-1", "leaked",
+                            scan_dt=_dt(days_ago=config.VAULT_TEMP_HIDE_AFTER_DAYS + 2))
+        self.assertNotIn("org-1", self.v.entries_by_org())
+        self.v.capture_scan("org-1", "leaked", scan_dt=_dt(days_ago=0))
+        self.assertIn("org-1", self.v.entries_by_org())          # refreshed -> visible
+
+    def test_managed_key_never_hidden(self):
+        self.v.add_entry("org-1", {"label": "M", "secret": "x", "kind": "managed"})
+        self.assertIn("org-1", self.v.entries_by_org())
+
+    def test_ordering_managed_first_then_temporary_newest(self):
+        self.v.capture_scan("org-1", "t-old", scan_dt=_dt(days_ago=2))
+        self.v.capture_scan("org-1", "t-new", scan_dt=_dt(hours_ago=1))
+        self.v.add_entry("org-1", {"label": "M1", "secret": "m1", "kind": "managed"})
+        rows = self.v.entries_by_org()["org-1"]
+        self.assertEqual([r["kind"] for r in rows], ["managed", "temporary", "temporary"])
+        temps = [r for r in rows if r["kind"] == "temporary"]
+        self.assertGreater(temps[0]["scan_dt"], temps[1]["scan_dt"])  # newest first
 
 
 if __name__ == "__main__":

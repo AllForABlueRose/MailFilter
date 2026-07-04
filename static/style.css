@@ -1763,8 +1763,11 @@ input.drop-target{
     color:#6b7280;
     vertical-align:middle;
 }
-/* Toolbar: the "hold Z to reveal all" hover zone and the search box. */
+/* Toolbar: the "hover to reveal all" hover zone and the search box. */
 .vault-reveal-all{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
     font-size:12px;
     color:#6b7280;
     border:1px dashed #cbd5e1;
@@ -1774,6 +1777,15 @@ input.drop-target{
     user-select:none;
 }
 .vault-reveal-all:hover{ border-color:#6366f1; color:#4338ca; }
+/* The "keep all" checkbox only appears while the zone is hovered (or already ticked). */
+.vault-reveal-all-pin{
+    display:none;
+    align-items:center;
+    gap:3px;
+    font-size:11px;
+}
+.vault-reveal-all:hover .vault-reveal-all-pin,
+.vault-reveal-all:has(.vault-reveal-all-pin input:checked) .vault-reveal-all-pin{ display:inline-flex; }
 .vault-search{
     flex:1;
     min-width:160px;
