@@ -479,17 +479,18 @@ function openVaultEntry(entryId, presetOrgId){
             if(found){ entry = found; break; }
         }
     }
-    const orgSel = document.getElementById("vaultEntryOrg");
-    orgSel.innerHTML = "";
-    Object.keys(vaultOrgNames).forEach(id => {
-        const opt = document.createElement("option");
-        opt.value = id; opt.textContent = vaultOrgNames[id];
-        orgSel.appendChild(opt);
-    });
-    const targetOrg = (entry && entry.org_id) || presetOrgId || orgSel.value;
-    orgSel.value = targetOrg || "";
+    // Org picker is a filterable combobox: the text input narrows the option list
+    // to substring matches, while the committed org_id lives in the hidden field
+    // that the save path reads.
+    const orgHidden = document.getElementById("vaultEntryOrg");
+    const orgInput = document.getElementById("vaultEntryOrgInput");
+    const orgIds = Object.keys(vaultOrgNames);
+    const targetOrg = (entry && entry.org_id) || presetOrgId || orgIds[0] || "";
+    orgHidden.value = targetOrg;
+    orgInput.value = targetOrg ? (vaultOrgNames[targetOrg] || "") : "";
     // An existing key keeps its org fixed (moving keys between orgs isn't a flow).
-    orgSel.disabled = !!entryId;
+    orgInput.disabled = !!entryId;
+    document.getElementById("vaultEntryOrgList").hidden = true;
 
     document.getElementById("vaultEntryTitle").textContent = entryId ? "Edit Key" : "New Key";
     document.getElementById("vaultEntryLabel").value = entry ? (entry.label || "") : "";
@@ -506,8 +507,98 @@ function openVaultEntry(entryId, presetOrgId){
 function closeVaultEntry(){
     // Don't leave a typed secret sitting in the field after closing.
     document.getElementById("vaultEntrySecret").value = "";
+    document.getElementById("vaultEntryOrgList").hidden = true;
     document.getElementById("vaultEntryModal").hidden = true;
     editingVaultEntryId = null;
+}
+
+// ----- org combobox: filter the org list to substring matches as the user types -----
+// The visible text input is only a filter/label; the chosen org_id is held in the
+// hidden #vaultEntryOrg field so the save path is unchanged.
+
+function renderVaultOrgOptions(query){
+    const list = document.getElementById("vaultEntryOrgList");
+    const q = (query || "").trim().toLowerCase();
+    const selected = document.getElementById("vaultEntryOrg").value;
+    list.innerHTML = "";
+    const matches = Object.keys(vaultOrgNames).filter(
+        id => vaultOrgNames[id].toLowerCase().includes(q));
+    if(!matches.length){
+        list.appendChild(el("li", "vault-org-empty", "No matching organizations"));
+        return;
+    }
+    matches.forEach(id => {
+        const li = el("li", "vault-org-opt", vaultOrgNames[id]);
+        li.dataset.orgId = id;
+        if(id === selected) li.classList.add("vault-org-opt-active");
+        // mousedown, not click, so the pick beats the input's blur handler.
+        li.addEventListener("mousedown", ev => { ev.preventDefault(); selectVaultOrg(id); });
+        list.appendChild(li);
+    });
+}
+
+function openVaultOrgList(){
+    const input = document.getElementById("vaultEntryOrgInput");
+    if(input.disabled) return;
+    input.select();               // first keystroke replaces the shown org name
+    renderVaultOrgOptions("");    // opening shows the full list
+    document.getElementById("vaultEntryOrgList").hidden = false;
+}
+
+function filterVaultOrgOptions(){
+    const input = document.getElementById("vaultEntryOrgInput");
+    if(input.disabled) return;
+    renderVaultOrgOptions(input.value);
+    document.getElementById("vaultEntryOrgList").hidden = false;
+}
+
+function selectVaultOrg(id){
+    document.getElementById("vaultEntryOrg").value = id;
+    document.getElementById("vaultEntryOrgInput").value = vaultOrgNames[id] || "";
+    document.getElementById("vaultEntryOrgList").hidden = true;
+}
+
+function vaultOrgBlur(){
+    // Let a pending option mousedown land first, then close and restore the input
+    // text to the committed selection (dropping any unmatched typing).
+    setTimeout(() => {
+        document.getElementById("vaultEntryOrgList").hidden = true;
+        const selected = document.getElementById("vaultEntryOrg").value;
+        document.getElementById("vaultEntryOrgInput").value =
+            selected ? (vaultOrgNames[selected] || "") : "";
+    }, 150);
+}
+
+function vaultOrgKeydown(ev){
+    const list = document.getElementById("vaultEntryOrgList");
+    if(ev.key === "Escape"){ list.hidden = true; return; }
+    if(ev.key === "ArrowDown" || ev.key === "ArrowUp"){
+        ev.preventDefault();
+        if(list.hidden){ filterVaultOrgOptions(); return; }
+        moveVaultOrgActive(ev.key === "ArrowDown" ? 1 : -1);
+        return;
+    }
+    if(ev.key === "Enter"){
+        const active = list.querySelector(".vault-org-opt-active") ||
+            list.querySelector(".vault-org-opt");
+        if(active && active.dataset.orgId){
+            ev.preventDefault();
+            selectVaultOrg(active.dataset.orgId);
+        }
+    }
+}
+
+function moveVaultOrgActive(delta){
+    const opts = Array.from(
+        document.getElementById("vaultEntryOrgList").querySelectorAll(".vault-org-opt"));
+    if(!opts.length) return;
+    let idx = opts.findIndex(o => o.classList.contains("vault-org-opt-active"));
+    idx = (idx < 0) ? (delta > 0 ? 0 : opts.length - 1) : idx + delta;
+    if(idx < 0) idx = opts.length - 1;
+    if(idx >= opts.length) idx = 0;
+    opts.forEach(o => o.classList.remove("vault-org-opt-active"));
+    opts[idx].classList.add("vault-org-opt-active");
+    opts[idx].scrollIntoView({block: "nearest"});
 }
 
 function vaultEntryError(msg){

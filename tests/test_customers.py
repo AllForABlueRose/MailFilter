@@ -191,5 +191,48 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(d["carol@acme.com"]["last_received"], "2026-06-01 09:30:00")
 
 
+class LabelResolverTests(unittest.TestCase):
+    def _org(self, oid, **over):
+        org = {"id": oid, "name": oid.title(), "display_name": "", "color": "#111111",
+               "domains": [], "contacts": [], "created": "2026-01-01 00:00:00"}
+        org.update(over)
+        return org
+
+    def test_member_label_uses_display_name_and_color(self):
+        orgs = [self._org("acme", name="Acme Corporation", display_name="Acme",
+                          color="#ff3366", domains=[{"domain": "acme.com", "role": "member"}])]
+        labels = customers.label_resolver(orgs)("carol@acme.com")
+        self.assertEqual(labels, [{"name": "Acme", "color": "#ff3366"}])
+
+    def test_display_name_falls_back_to_real_name(self):
+        orgs = [self._org("acme", name="Acme Corporation", display_name="",
+                          domains=[{"domain": "acme.com", "role": "member"}])]
+        self.assertEqual(customers.label_resolver(orgs)("carol@acme.com")[0]["name"],
+                         "Acme Corporation")
+
+    def test_member_then_representative_both_labelled(self):
+        orgs = [
+            self._org("x", name="Xco", domains=[{"domain": "acme.com", "role": "member"}]),
+            self._org("acme", name="Acme", contacts=[{"email": "rep@acme.com",
+                                                       "role": "representative"}]),
+        ]
+        labels = customers.label_resolver(orgs)("rep@acme.com")
+        self.assertEqual([l["name"] for l in labels], ["Xco", "Acme"])
+
+    def test_same_org_on_both_axes_deduped(self):
+        orgs = [self._org("acme", name="Acme",
+                          domains=[{"domain": "acme.com", "role": "member"}],
+                          contacts=[{"email": "bob@acme.com", "role": "representative"}])]
+        self.assertEqual(customers.label_resolver(orgs)("bob@acme.com"),
+                         [{"name": "Acme", "color": "#111111"}])
+
+    def test_unresolved_and_non_smtp_yield_no_labels(self):
+        orgs = [self._org("acme", domains=[{"domain": "acme.com", "role": "member"}])]
+        resolve = customers.label_resolver(orgs)
+        self.assertEqual(resolve("nobody@nowhere.com"), [])
+        self.assertEqual(resolve(""), [])
+        self.assertEqual(resolve("/O=EX/CN=foo"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -94,6 +94,20 @@ class RouteTests(unittest.TestCase):
         self.assertIsInstance(vm["recipients"], list)
         self.assertIn("cc", vm)
 
+    def test_api_mail_org_labels_default_empty(self):
+        # No org maps the seeded senders, so every mail carries an empty label list.
+        for vm in self.client.get("/api/mail").get_json()["mails"]:
+            self.assertEqual(vm["org_labels"], [])
+
+    def test_api_mail_org_labels_resolve_sender(self):
+        # Map the seeded sender's domain to an org; its display-name/colour pill
+        # then appears on every mail from that domain.
+        cs = self.app.extensions["customer_store"]
+        org = cs.create({"name": "Example Inc", "display_name": "Ex", "color": "#0a0b0c"})
+        cs.set_domain(org["id"], "example.com", "member")
+        vm = self.client.get("/api/mail").get_json()["mails"][0]
+        self.assertEqual(vm["org_labels"], [{"name": "Ex", "color": "#0a0b0c"}])
+
     def test_attachment_blacklist_omits_in_api(self):
         self.store.add_mails([
             make_mail(id="BL", attachments=[{"filename": "virus.exe"}, {"filename": "doc.pdf"}]),

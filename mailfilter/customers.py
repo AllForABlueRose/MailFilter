@@ -183,6 +183,45 @@ def resolve(email, orgs):
     }
 
 
+def _org_label(org):
+    """A mail-list label for ``org``: ``{name, color}``. ``name`` is the display
+    name (the nickname if set, else the real name — mirroring the frontend's
+    ``orgDisplayName``); ``color`` is the org's card colour. Display-name-only, so
+    it never leaks the real name when a nickname is set."""
+    display = (org.get("display_name") or "").strip() or org.get("name", "")
+    return {"name": display, "color": org.get("color", "")}
+
+
+def label_resolver(orgs):
+    """Return ``email -> [{name, color}]`` resolving a sender to its org label(s).
+
+    The resolution maps are built **once** so a caller can label every mail in a
+    list without rebuilding them per call. A sender resolves on both axes (§3.12):
+    the label list is the base-membership org followed by the represented org when
+    it is a *different* org (deduplicated by id), each a display-name/colour pill.
+    Empty for an unresolved or non-SMTP address. Pure — no HTML; the frontend
+    inserts ``name`` as DOM text (the people-field rule).
+    """
+    maps = _resolution_maps(orgs)
+
+    def resolve_labels(email):
+        email = _normalize_email(email)
+        if not email:
+            return []
+        domain = _domain_of(email)
+        member_org = maps["member_email"].get(email) or maps["member_domain"].get(domain)
+        rep_org = maps["rep_email"].get(email) or maps["rep_domain"].get(domain)
+        labels, seen = [], set()
+        for org in (member_org, rep_org):
+            if org is None or org.get("id") in seen:
+                continue
+            seen.add(org.get("id"))
+            labels.append(_org_label(org))
+        return labels
+
+    return resolve_labels
+
+
 def build_directory(mails, orgs):
     """Aggregate contacts from ``mails`` and resolve each on both axes.
 

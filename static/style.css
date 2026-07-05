@@ -272,6 +272,41 @@ body{
     width:auto;
     margin:0;
 }
+/* Vault org picker: a filterable combobox — a text input over an absolutely
+   positioned list that narrows to substring matches as the user types. */
+.vault-org-combo{
+    position:relative;
+}
+.vault-org-list{
+    position:absolute;
+    top:100%;
+    left:0;
+    right:0;
+    z-index:10;
+    margin:2px 0 0;
+    padding:4px 0;
+    list-style:none;
+    max-height:200px;
+    overflow-y:auto;
+    background:#fff;
+    border:1px solid #d1d5db;
+    border-radius:4px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.12);
+}
+.vault-org-opt{
+    padding:8px 12px;
+    font-size:14px;
+    cursor:pointer;
+}
+.vault-org-opt:hover,
+.vault-org-opt-active{
+    background:#eef2ff;
+}
+.vault-org-empty{
+    padding:8px 12px;
+    font-size:13px;
+    color:#9ca3af;
+}
 .auto-modal-actions{
     display:flex;
     gap:10px;
@@ -433,8 +468,37 @@ body{
     top:8px;
     right:8px;
     display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:4px;
+}
+.card-corner-tags{
+    display:flex;
     gap:6px;
     align-items:center;
+}
+/* The org-label row sits below the emoji tags, right-aligned, wrapping if there
+   are several. Each pill is filled with the org's colour, white text. */
+.card-orgs{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+    gap:4px;
+    max-width:220px;
+}
+.org-label{
+    font-size:11px;
+    line-height:1;
+    font-weight:600;
+    color:#fff;
+    background:#9ca3af;
+    padding:3px 8px;
+    border-radius:10px;
+    max-width:200px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    cursor:default;
 }
 .card-tag{
     font-size:15px;
@@ -952,8 +1016,16 @@ input.drop-target{
    running/idle state) — the accent paints the name, border, and chips. */
 .org-card{
     --org-color:#3b82f6;
+    /* The "on-colour" ink a filled card paints its text/border/pattern with. The
+       card_ink="black" toggle (.ink-black below) flips it; outline cards keep the
+       org colour for text, so --ink only bites once a card is filled. */
+    --ink:#fff;
+    /* Decoration colour for the corner/banner/scene motifs: the org tint on an
+       outline card (contrasts the white fill), --ink on a filled card (contrasts
+       the coloured fill). One var keeps every motif legible on either style. */
+    --deco:var(--org-color);
     /* The pattern-fill ink. Outline cards tint the org colour faintly over white;
-       filled cards (below) switch it to translucent white over the colour. */
+       filled cards (below) switch it to translucent --ink over the colour. */
     --pattern-color:color-mix(in srgb, var(--org-color) 16%, transparent);
     position:relative;
     display:flex;
@@ -985,30 +1057,36 @@ input.drop-target{
    org colour as the card background, white text and a white border. The pattern
    ink flips to translucent white so a texture reads over the colour. */
 .org-card.style-filled{
-    --pattern-color:rgba(255,255,255,0.22);
+    --pattern-color:color-mix(in srgb, var(--ink) 22%, transparent);
+    --deco:var(--ink);
     background-color:var(--org-color);
-    border-color:#fff;
-    color:#fff;
+    border-color:var(--ink);
+    color:var(--ink);
 }
-.org-card.style-filled .org-card-name{ color:#fff; }
-.org-card.style-filled .org-card-foot{ color:rgba(255,255,255,0.88); }
-.org-card.style-filled .org-nodomains{ color:rgba(255,255,255,0.85); }
+.org-card.style-filled .org-card-name{ color:var(--ink); }
+.org-card.style-filled .org-card-foot{ color:color-mix(in srgb, var(--ink) 88%, transparent); }
+.org-card.style-filled .org-nodomains{ color:color-mix(in srgb, var(--ink) 85%, transparent); }
 /* The selection/drop ring is the org colour, invisible on a same-colour card, so
-   give filled cards a white inner ring then the colour outer ring for contrast. */
+   give filled cards an --ink inner ring then the colour outer ring for contrast. */
 .org-card.style-filled.selected,
 .org-card.style-filled.drag-over{
-    box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--org-color);
+    box-shadow:0 0 0 3px var(--ink), 0 0 0 6px var(--org-color);
 }
 .org-card.style-filled.drag-over{ background-color:var(--org-color); }
 /* The category pill on a filled card is a solid overlay in its own selected
-   colour (not translucent), with white text and a dotted white border so it
+   colour (not translucent), with --ink text and a dotted --ink border so it
    reads as sitting on top of the coloured card. */
 .org-card.style-filled .org-cat{
-    color:#fff;
-    border-color:#fff;
+    color:var(--ink);
+    border-color:var(--ink);
     background-color:var(--cat-color);
     background-image:none;
 }
+
+/* Accent-ink flip (card_ink="black"): swap the filled card's white text, border,
+   pattern ink and every --deco motif to black in one switch. On an outline card
+   --ink is unused (the text is the org colour), so this is a no-op there. */
+.org-card.ink-black{ --ink:#000; }
 
 /* ----- Pattern fills (uniform CSS-gradient textures; ink = --pattern-color) ----- */
 /* background-image only, so each layers over the card's background-colour without
@@ -1033,6 +1111,157 @@ input.drop-target{
         linear-gradient(45deg, var(--pattern-color) 25%, transparent 25% 75%, var(--pattern-color) 75%);
     background-size:16px 16px;
     background-position:0 0, 8px 8px;
+}
+/* Cross-hatch: the "lines" gradient crossed with its mirror — a woven texture. */
+.org-card.pattern-hatch{
+    background-image:
+        repeating-linear-gradient(45deg,  var(--pattern-color) 0 2px, transparent 2px 10px),
+        repeating-linear-gradient(-45deg, var(--pattern-color) 0 2px, transparent 2px 10px);
+}
+/* Stripes: bold vertical bands — a heavier, more corporate texture than lines. */
+.org-card.pattern-stripes{
+    background-image:repeating-linear-gradient(90deg,
+        var(--pattern-color) 0 8px, transparent 8px 16px);
+}
+/* Confetti: two offset dot layers at different sizes for a livelier speckle. */
+.org-card.pattern-confetti{
+    background-image:
+        radial-gradient(var(--pattern-color) 1.5px, transparent 1.6px),
+        radial-gradient(var(--pattern-color) 1px, transparent 1.1px);
+    background-size:18px 18px, 18px 18px;
+    background-position:0 0, 9px 9px;
+}
+
+/* ----- Corner / edge / scene decorations -----
+   These are absolutely-positioned overlays (corner + scene are child divs added
+   by customers.js; the edge banners ride the card's own ::before/::after). They
+   paint at z-index:0 — behind the card text but over the background/pattern — so
+   the card's real content is lifted to z-index:1 (the already-absolute category
+   pill and actions box ride one layer above that). Every motif is filled with
+   --deco, so it contrasts the card on either style and follows the ink toggle. */
+.org-card > .org-card-head,
+.org-card > .org-chips,
+.org-card > .org-notes,
+.org-card > .org-card-foot,
+.org-card > .org-vault-info{ position:relative; z-index:1; }
+.org-card > .org-cat,
+.org-card > .org-card-actions{ z-index:2; }
+.org-corner,
+.org-scene{ z-index:0; pointer-events:none; }
+
+/* Edge banners: an accent strip flush to the bottom and/or right inner edge. The
+   offsets sit inside the 2px border (abs-pos containing block = padding box), so
+   the 10px inner-corner radius lines up. */
+.org-card.banner-bottom::before{
+    content:"";
+    position:absolute;
+    left:0; right:0; bottom:0;
+    height:6px;
+    background:var(--deco);
+    border-radius:0 0 10px 10px;
+    z-index:0;
+}
+.org-card.banner-right::after{
+    content:"";
+    position:absolute;
+    top:0; bottom:0; right:0;
+    width:6px;
+    background:var(--deco);
+    border-radius:0 10px 10px 0;
+    z-index:0;
+}
+
+/* Corner motif container: a 44px box pinned to the chosen corner. */
+.org-corner{
+    position:absolute;
+    width:44px;
+    height:44px;
+}
+.org-corner.pos-top-right{ top:0; right:0; }
+.org-corner.pos-bottom-right{ bottom:0; right:0; }
+
+/* Corner banner: a solid folded-corner triangle hugging the corner. */
+.org-corner.corner-banner{ background:var(--deco); }
+.org-corner.corner-banner.pos-top-right{
+    clip-path:polygon(0 0, 100% 0, 100% 100%);
+    border-radius:0 10px 0 0;
+}
+.org-corner.corner-banner.pos-bottom-right{
+    clip-path:polygon(100% 0, 100% 100%, 0 100%);
+    border-radius:0 0 10px 0;
+}
+
+/* Ribbon: a diagonal band drawn on the corner box's ::before and clipped to it. */
+.org-corner.corner-ribbon{ overflow:hidden; }
+.org-corner.corner-ribbon::before{
+    content:"";
+    position:absolute;
+    left:50%; top:50%;
+    width:80px; height:14px;
+    margin-left:-40px; margin-top:-7px;
+    background:var(--deco);
+    box-shadow:0 1px 2px rgba(0,0,0,0.2);
+}
+.org-corner.corner-ribbon.pos-top-right::before{ transform:rotate(45deg); }
+.org-corner.corner-ribbon.pos-bottom-right::before{ transform:rotate(-45deg); }
+
+/* Star: a five-point star badge, clipped from a --deco square. */
+.org-corner.corner-star{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.org-corner.corner-star::before{
+    content:"";
+    width:22px;
+    height:22px;
+    background:var(--deco);
+    clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
+        50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));
+}
+
+/* Bottom-half scenes: a soft motif band across the card's lower half. Kept faint
+   (translucent --deco) and clipped to the inner rounded corners; the foot text
+   sits above it at z-index:1. */
+.org-scene{
+    position:absolute;
+    left:0; right:0; bottom:0;
+    height:48%;
+    overflow:hidden;
+    border-radius:0 0 10px 10px;
+}
+/* Waves: interlocking arcs tiled along the bottom form a wavy chain. */
+.org-scene.scene-wave{
+    --wc:color-mix(in srgb, var(--deco) 30%, transparent);
+    background-image:
+        radial-gradient(circle at 100% 50%, transparent 20%, var(--wc) 21% 34%, transparent 35%),
+        radial-gradient(circle at 0% 50%, transparent 20%, var(--wc) 21% 34%, transparent 35%);
+    background-size:20px 14px;
+    background-position:bottom;
+    background-repeat:repeat-x;
+}
+/* Clouds: overlapping soft puffs sitting on the bottom edge. */
+.org-scene.scene-cloud{
+    --cc:color-mix(in srgb, var(--deco) 22%, transparent);
+    background-repeat:no-repeat;
+    background-image:
+        radial-gradient(circle at 20% 95%, var(--cc) 0 14px, transparent 16px),
+        radial-gradient(circle at 34% 86%, var(--cc) 0 18px, transparent 20px),
+        radial-gradient(circle at 52% 96%, var(--cc) 0 16px, transparent 18px),
+        radial-gradient(circle at 70% 88%, var(--cc) 0 20px, transparent 22px),
+        radial-gradient(circle at 86% 95%, var(--cc) 0 14px, transparent 16px);
+}
+/* Wind: a few thin streaks at staggered lengths and heights suggest gusts. */
+.org-scene.scene-wind{
+    --wd:color-mix(in srgb, var(--deco) 34%, transparent);
+    background-repeat:no-repeat;
+    background-image:
+        linear-gradient(var(--wd), var(--wd)),
+        linear-gradient(var(--wd), var(--wd)),
+        linear-gradient(var(--wd), var(--wd));
+    background-size:60% 2px, 44% 2px, 52% 2px;
+    background-position:14% 40%, 34% 62%, 20% 82%;
 }
 
 /* Actions live in a bordered box pinned bottom-right, walled off from the card's
@@ -1115,6 +1344,20 @@ input.drop-target{
     padding:6px 12px;
     font-size:13px;
 }
+/* Builder: the corner-icon dropdown and its top/bottom position toggle share a
+   row; the ink toggle is a standalone flip button. Both toggles are compact. */
+.org-corner-field{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.org-corner-field select{ flex:1; }
+.org-ink-toggle,
+.org-corner-pos{
+    padding:6px 12px;
+    font-size:13px;
+    white-space:nowrap;
+}
 /* Builder: live preview of the card's chosen style/pattern/colours. The mini
    card is non-interactive (it just mirrors the form) and never stretches. */
 .org-preview-wrap{
@@ -1176,8 +1419,8 @@ input.drop-target{
     overflow:hidden;
 }
 .org-card.style-filled .org-notes{
-    color:rgba(255,255,255,0.92);
-    border-top-color:rgba(255,255,255,0.45);
+    color:color-mix(in srgb, var(--ink) 92%, transparent);
+    border-top-color:color-mix(in srgb, var(--ink) 45%, transparent);
 }
 .org-card-foot{
     font-size:12px;
@@ -1544,6 +1787,9 @@ input.drop-target{
 }
 
 /* Suspected Customers List: keyword -> organization rows. */
+.suspected-modal{
+    width:min(920px, 100%);
+}
 .suspected-rows{
     display:flex;
     flex-direction:column;
@@ -1556,7 +1802,7 @@ input.drop-target{
     gap:8px;
 }
 .suspected-keyword{
-    flex:1 1 auto;
+    flex:0 1 240px;
     min-width:0;
     box-sizing:border-box;
     font-family:inherit;
@@ -1566,11 +1812,53 @@ input.drop-target{
     flex:0 0 auto;
     opacity:0.6;
 }
-.suspected-org{
+/* Org picker: filterable combobox — text input over an absolute dropdown that
+   narrows to substring matches; wider than the keyword field. */
+.suspected-org-combo{
     flex:1 1 auto;
     min-width:0;
+    position:relative;
+}
+.suspected-org-input{
+    width:100%;
+    box-sizing:border-box;
     font-family:inherit;
     font-size:13px;
+}
+.suspected-org-list{
+    position:absolute;
+    top:100%;
+    left:0;
+    right:0;
+    z-index:10;
+    margin:2px 0 0;
+    padding:4px 0;
+    list-style:none;
+    max-height:200px;
+    overflow-y:auto;
+    background:#fff;
+    border:1px solid #d1d5db;
+    border-radius:4px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.12);
+}
+.suspected-org-list-up{
+    top:auto;
+    bottom:100%;
+    margin:0 0 2px;
+}
+.suspected-org-opt{
+    padding:6px 10px;
+    font-size:13px;
+    cursor:pointer;
+}
+.suspected-org-opt:hover,
+.suspected-org-opt-active{
+    background:#eef2ff;
+}
+.suspected-org-empty{
+    padding:6px 10px;
+    font-size:12px;
+    color:#9ca3af;
 }
 
 /* ----- Smart Password Detection ----- */
@@ -1908,9 +2196,9 @@ input.drop-target{
     color:#6b7280;
     margin-top:1px;
 }
-.org-card.style-filled .org-vault-info{ border-top-color:rgba(255,255,255,0.45); }
+.org-card.style-filled .org-vault-info{ border-top-color:color-mix(in srgb, var(--ink) 45%, transparent); }
 .org-card.style-filled .org-vault-lead,
-.org-card.style-filled .org-vault-line{ color:rgba(255,255,255,0.92); }
+.org-card.style-filled .org-vault-line{ color:color-mix(in srgb, var(--ink) 92%, transparent); }
 
 /* Read-only Key Vault block inside the org editor: a boxed, non-editable panel
    (no per-org colour var here, so neutralize the card's coloured top border). */
@@ -1927,6 +2215,10 @@ input.drop-target{
     position:fixed; right:18px; bottom:18px; z-index:60;
     display:flex; align-items:center; gap:10px;
 }
+/* The `display:flex` above overrides the UA `[hidden]{display:none}` rule, so the
+   dock's hidden attribute (set by syncUnlockStation when the vault is locked) needs
+   an explicit, higher-specificity guard to actually hide it. */
+.unlock-dock[hidden], .unlock-panel[hidden]{ display:none; }
 .unlock-status{
     max-width:520px; padding:6px 10px; border-radius:8px;
     background:#111827; color:#f9fafb; font-size:12px; line-height:1.4;
@@ -1949,9 +2241,8 @@ input.drop-target{
 .unlock-toggle:hover{ background:#6d28d9; }
 
 .unlock-panel{
-    position:fixed; top:0; right:0; height:100vh; width:min(560px,92vw);
-    background:#fff; border-left:1px solid #e5e7eb; z-index:55;
-    box-shadow:-8px 0 30px rgba(0,0,0,.18);
+    position:fixed; top:0; left:0; right:0; height:100vh; width:100vw;
+    background:#fff; z-index:55;
     transform:translateX(100%); transition:transform .3s ease;
     display:flex; flex-direction:column;
 }
@@ -1969,20 +2260,27 @@ input.drop-target{
     border-radius:8px; font-size:13px; width:220px; max-width:50%;
 }
 .unlock-grid{ overflow:auto; padding:4px 14px 14px; }
-#unlockFileGrid{ display:flex; flex-wrap:wrap; gap:10px; align-content:flex-start; }
+#unlockFileGrid{ display:block; }
 .unlock-empty{ color:#6b7280; font-size:13px; padding:8px 2px; }
 
-.unlock-key-group{ margin-bottom:12px; }
-.unlock-group-head{
-    font-size:12px; font-weight:600; color:#374151; padding:4px 8px; border-radius:6px;
-    background:color-mix(in srgb, var(--org-color,#9ca3af) 16%, #fff);
-    border-left:4px solid var(--org-color,#9ca3af); margin-bottom:6px;
+/* One continuous org-tinted panel per organization; individual tiles sit on it as
+   neutral cards so the colour reads as a single backdrop for the whole org. */
+.unlock-key-group, .unlock-file-group{
+    margin-bottom:12px; padding:8px 10px 10px; border-radius:10px;
+    background:color-mix(in srgb, var(--org-color,#9ca3af) 14%, #fff);
+    border:1px solid color-mix(in srgb, var(--org-color,#9ca3af) 30%, #fff);
+    border-left:4px solid var(--org-color,#9ca3af);
 }
-.unlock-tiles{ display:flex; flex-wrap:wrap; gap:8px; }
+.unlock-file-group.no-org{
+    background:#f9fafb; border-color:#e5e7eb; border-left-color:#d1d5db;
+}
+.unlock-group-head{
+    font-size:12px; font-weight:600; color:#374151; padding:2px 2px 6px; margin-bottom:4px;
+}
+.unlock-tiles, .unlock-file-tiles{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
 .unlock-key-tile{
     width:120px; padding:8px; border-radius:10px; cursor:grab;
-    background:color-mix(in srgb, var(--org-color,#9ca3af) 12%, #fff);
-    border:1px solid color-mix(in srgb, var(--org-color,#9ca3af) 40%, #fff);
+    background:rgba(255,255,255,.72); border:1px solid rgba(17,24,39,.12);
 }
 .unlock-key-tile:active{ cursor:grabbing; }
 .unlock-key-icon{ font-size:20px; }
@@ -1999,10 +2297,8 @@ input.drop-target{
 
 .unlock-file-tile{
     width:150px; padding:10px; border-radius:10px; position:relative;
-    background:color-mix(in srgb, var(--org-color,#9ca3af) 12%, #fff);
-    border:1px solid color-mix(in srgb, var(--org-color,#9ca3af) 40%, #fff);
+    background:rgba(255,255,255,.72); border:1px solid rgba(17,24,39,.12);
 }
-.unlock-file-tile.no-org{ background:#f9fafb; border-color:#e5e7eb; }
 .unlock-file-tile.drop-hover{ outline:2px dashed #2563eb; outline-offset:2px; }
 .unlock-file-icon{ font-size:24px; position:relative; display:inline-block; }
 .unlock-lock-badge{ position:absolute; top:-6px; right:-10px; font-size:12px; }

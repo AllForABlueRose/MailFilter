@@ -166,9 +166,9 @@ function renderUnlockKeys(){
 }
 
 function buildKeyTile(entry, orgId){
+    // Neutral card; the org colour is a continuous backdrop on the enclosing
+    // .unlock-key-group, not the tile itself.
     const tile = el("div", "unlock-key-tile");
-    const color = unlockOrgColor(orgId);
-    if(color){ tile.style.setProperty("--org-color", color); }
     tile.draggable = true;
     tile.dataset.entryId = entry.id;
     tile.addEventListener("dragstart", e => {
@@ -227,14 +227,39 @@ function renderUnlockFiles(){
             : "No files in today's workspace yet."));
         return;
     }
-    files.forEach(f => grid.appendChild(buildFileTile(f)));
+    // Group by organization (mirrors the key explorer) so each org gets one
+    // continuous coloured panel; files with no org fall into a trailing neutral bucket.
+    const NO_ORG = "__noorg__";
+    const byOrg = {};
+    files.forEach(f => {
+        const key = f.org_id || NO_ORG;
+        (byOrg[key] || (byOrg[key] = [])).push(f);
+    });
+    // Order: org-meta insertion order, then any unknown org, no-org last.
+    const ordered = Object.keys(unlockOrgMeta).filter(id => byOrg[id])
+        .concat(Object.keys(byOrg).filter(id => id !== NO_ORG && !(id in unlockOrgMeta)));
+    if(byOrg[NO_ORG]) ordered.push(NO_ORG);
+    ordered.forEach(orgId => {
+        const group = el("div", "unlock-file-group");
+        if(orgId === NO_ORG){
+            group.classList.add("no-org");
+            group.appendChild(el("div", "unlock-group-head", "User-added · no organization"));
+        } else {
+            const color = unlockOrgColor(orgId);
+            if(color){ group.style.setProperty("--org-color", color); }
+            group.appendChild(el("div", "unlock-group-head", unlockOrgLabel(orgId)));
+        }
+        const tiles = el("div", "unlock-file-tiles");
+        byOrg[orgId].forEach(f => tiles.appendChild(buildFileTile(f)));
+        group.appendChild(tiles);
+        grid.appendChild(group);
+    });
 }
 
 function buildFileTile(f){
+    // Neutral card; the org colour is a continuous backdrop on the enclosing
+    // .unlock-file-group, not the tile itself.
     const tile = el("div", "unlock-file-tile kind-" + f.kind);
-    const color = f.org_id ? unlockOrgColor(f.org_id) : "";
-    if(color){ tile.style.setProperty("--org-color", color); }
-    else { tile.classList.add("no-org"); }
 
     tile.addEventListener("dragover", e => {
         e.preventDefault(); e.dataTransfer.dropEffect = "copy"; tile.classList.add("drop-hover");

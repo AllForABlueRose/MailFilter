@@ -140,10 +140,14 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                      experimental_store, customer_match_store, vault_store):
     bp = Blueprint("mailfilter", __name__)
 
-    def view_model(mail, query):
+    def view_model(mail, query, resolve_labels=None):
         view = to_view_model(mail, query.main, query.optional,
                              query.attachment_blacklist, query.links_blacklist)
         view["tags"] = tag_store.tags_for(mail["id"])
+        # The sender's resolved customer-organization label(s), when a resolver is
+        # supplied (built once per request). Derived from the customer store, which
+        # the presenter must not import, so it's attached here like `tags`.
+        view["org_labels"] = resolve_labels(mail.get("sender_email", "")) if resolve_labels else []
         return view
 
     def _resolve_org_id(email):
@@ -282,11 +286,12 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         hidden, twin_links = (set(), {})
         if query.dedupe and query.dedupe_subject.strip():
             hidden, twin_links = dedup.dedupe(snap, query.dedupe_subject)
+        resolve_labels = customers.label_resolver(customer_store.snapshot())
         out = []
         for m in mails:
             if m["id"] in hidden:
                 continue
-            view = view_model(m, query)
+            view = view_model(m, query, resolve_labels)
             urls = twin_links.get(m["id"])
             if urls:
                 view["links"] = view["links"] + extra_link_views(
@@ -301,7 +306,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         # malformed expression simply highlights nothing.
         query = MailQuery.from_args(request.args)
         mails = store.thread_for(request.args.get("id", ""))
-        return jsonify({"mails": [view_model(m, query) for m in mails]})
+        resolve_labels = customers.label_resolver(customer_store.snapshot())
+        return jsonify({"mails": [view_model(m, query, resolve_labels) for m in mails]})
 
     @bp.get("/attachments/<mail_id>/<int:index>")
     def download_attachment(mail_id, index):

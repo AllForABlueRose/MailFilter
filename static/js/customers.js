@@ -93,16 +93,56 @@ function renderOrganizations(){
     list.forEach(o => grid.appendChild(createOrgCard(o, counts[o.id])));
 }
 
+// Read the (already-clamped) appearance enums off a stored org into one cfg the
+// shared painter understands. Defaults mirror the store's own first-entry clamps.
+function orgCfgFromObj(o){
+    return {
+        color: o.color,
+        style: o.card_style || "outline",
+        pattern: o.card_pattern || "none",
+        ink: o.card_ink || "white",
+        corner: o.card_corner || "none",
+        cornerPos: o.card_corner_pos || "top-right",
+        banner: o.card_banner || "none",
+        scene: o.card_scene || "none",
+    };
+}
+
+// The appearance class tokens. style/pattern/ink and the edge banners are pure
+// CSS (banners ride the card's ::before/::after), so they are class names; the
+// corner and bottom-scene motifs are overlay children synced separately below.
+function orgAppearanceClasses(cfg){
+    return "style-" + cfg.style
+        + " pattern-" + cfg.pattern
+        + (cfg.ink === "black" ? " ink-black" : "")
+        + ((cfg.banner === "bottom" || cfg.banner === "both") ? " banner-bottom" : "")
+        + ((cfg.banner === "right" || cfg.banner === "both") ? " banner-right" : "");
+}
+
+// Paint a card element from cfg: accent colour + class tokens (plus caller extras
+// like "selected"/"org-preview-card"), then (re)build the corner + scene overlay
+// children. Overlays are absolutely positioned under the card text (z-index rules
+// in style.css), so append order relative to the content does not matter. Shared
+// by the grid cards and the builder's live preview so the two never drift.
+function applyOrgAppearance(card, cfg, extra){
+    card.className = ("org-card " + orgAppearanceClasses(cfg) + " " + (extra || "")).trim();
+    card.style.setProperty("--org-color", cfg.color);
+    card.querySelectorAll(".org-corner, .org-scene").forEach(el => el.remove());
+    if(cfg.corner !== "none"){
+        const c = document.createElement("div");
+        c.className = "org-corner corner-" + cfg.corner + " pos-" + cfg.cornerPos;
+        card.appendChild(c);
+    }
+    if(cfg.scene !== "none"){
+        const s = document.createElement("div");
+        s.className = "org-scene scene-" + cfg.scene;
+        card.appendChild(s);
+    }
+}
+
 function createOrgCard(o, counts){
     const card = document.createElement("div");
-    // Appearance: outline|filled style + an optional texture; both come straight
-    // from the (already-clamped) stored fields, prefixed into class names. The
-    // pattern colour adapts to the style via a CSS var (org tint vs. white) in CSS.
-    card.className = "org-card"
-        + " style-" + (o.card_style || "outline")
-        + " pattern-" + (o.card_pattern || "none")
-        + (o.id === selectedOrgId ? " selected" : "");
-    card.style.setProperty("--org-color", o.color);
+    applyOrgAppearance(card, orgCfgFromObj(o), o.id === selectedOrgId ? "selected" : "");
     card.title = "Click to view this organization's contacts";
     card.onclick = () => selectOrg(o.id);
     makeOrgDropTarget(card, o.id);
@@ -541,6 +581,11 @@ function openOrgBuilder(id){
     document.getElementById("orgCategoryColor").value = o ? (o.category_color || "#6366f1") : "#6366f1";
     document.getElementById("orgCardStyle").value = o ? (o.card_style || "outline") : "outline";
     document.getElementById("orgCardPattern").value = o ? (o.card_pattern || "none") : "none";
+    setOrgInkToggle(o ? (o.card_ink || "white") : "white");
+    document.getElementById("orgCardCorner").value = o ? (o.card_corner || "none") : "none";
+    setOrgCornerPosToggle(o ? (o.card_corner_pos || "top-right") : "top-right");
+    document.getElementById("orgCardBanner").value = o ? (o.card_banner || "none") : "none";
+    document.getElementById("orgCardScene").value = o ? (o.card_scene || "none") : "none";
     document.getElementById("orgNotes").value = o ? (o.notes || "") : "";
 
     // Read-only Key Vault status mirrored from the card (shown only when the org
@@ -635,15 +680,50 @@ function onOrgColorChanged(){
     updateOrgPreview();
 }
 
+// The appearance cfg read off the builder form controls (the toggle buttons keep
+// their value in a data-attribute; the rest are plain <select>s). Mirror shape of
+// orgCfgFromObj so the same painter drives both the preview and the grid cards.
+function orgCfgFromForm(){
+    return {
+        color: document.getElementById("orgColor").value,
+        style: document.getElementById("orgCardStyle").value,
+        pattern: document.getElementById("orgCardPattern").value,
+        ink: document.getElementById("orgCardInk").dataset.value,
+        corner: document.getElementById("orgCardCorner").value,
+        cornerPos: document.getElementById("orgCardCornerPos").dataset.value,
+        banner: document.getElementById("orgCardBanner").value,
+        scene: document.getElementById("orgCardScene").value,
+    };
+}
+
+// The two flip toggles keep their state in data-value and show a labelled glyph.
+function setOrgInkToggle(v){
+    const btn = document.getElementById("orgCardInk");
+    btn.dataset.value = v;
+    btn.textContent = v === "black" ? "⬛ Black ink" : "⬜ White ink";
+}
+function toggleOrgInk(){
+    const btn = document.getElementById("orgCardInk");
+    setOrgInkToggle(btn.dataset.value === "black" ? "white" : "black");
+    updateOrgPreview();
+}
+function setOrgCornerPosToggle(v){
+    const btn = document.getElementById("orgCardCornerPos");
+    btn.dataset.value = v;
+    btn.textContent = v === "bottom-right" ? "↘ Bottom-right" : "↗ Top-right";
+}
+function toggleOrgCornerPos(){
+    const btn = document.getElementById("orgCardCornerPos");
+    setOrgCornerPosToggle(btn.dataset.value === "bottom-right" ? "top-right" : "bottom-right");
+    updateOrgPreview();
+}
+
 // Paint the modal's mini preview card from the current control values so the
 // style/pattern/colour choices are visible before saving.
 function updateOrgPreview(){
     const card = document.getElementById("orgPreview");
     if(!card) return;
-    const style = document.getElementById("orgCardStyle").value;
-    const pattern = document.getElementById("orgCardPattern").value;
-    card.className = "org-card org-preview-card style-" + style + " pattern-" + pattern;
-    card.style.setProperty("--org-color", document.getElementById("orgColor").value);
+    applyOrgAppearance(card, orgCfgFromForm(), "org-preview-card");
     const name = document.getElementById("orgName").value.trim()
         || document.getElementById("orgDisplayName").value.trim() || "Preview";
     card.querySelector(".org-card-name").textContent = name;
@@ -675,6 +755,11 @@ async function saveOrganization(){
         category_color: document.getElementById("orgCategoryColor").value,
         card_style: document.getElementById("orgCardStyle").value,
         card_pattern: document.getElementById("orgCardPattern").value,
+        card_ink: document.getElementById("orgCardInk").dataset.value,
+        card_corner: document.getElementById("orgCardCorner").value,
+        card_corner_pos: document.getElementById("orgCardCornerPos").dataset.value,
+        card_banner: document.getElementById("orgCardBanner").value,
+        card_scene: document.getElementById("orgCardScene").value,
         notes: document.getElementById("orgNotes").value.trim(),
         domains: parseDomains("orgMemberDomains", "member")
             .concat(parseDomains("orgRepDomains", "representative")),

@@ -7,8 +7,11 @@ nickname shown in the Customer Management view in place of the name (blank => th
 name is shown; downstream workflows always resolve the real ``name``, never this),
 a card colour, a free-text formality
 ``category`` (empty by default — configured later) with its own ``category_color``
-label accent, a ``card_style``/``card_pattern`` pair driving the card's appearance
-(outline vs. filled, and an optional texture), free-text ``notes`` (things to be
+label accent, a bundle of card-appearance enums driving the card's look
+(``card_style`` outline/filled, ``card_pattern`` texture, ``card_ink`` white/black
+accent toggle, ``card_corner``/``card_corner_pos`` corner motif, ``card_banner``
+edge strips, ``card_scene`` bottom-half motif — each clamped to its
+``config.ORG_CARD_*`` set), free-text ``notes`` (things to be
 mindful of when dealing with the org — also the home for future per-org settings,
 which extend the coerced fields the same way), a set of ``domains`` and a set
 of per-contact ``contacts`` overrides, each carrying a role from
@@ -333,6 +336,17 @@ class CustomerStore:
                 raw.get("card_style", base.get("card_style")), config.ORG_CARD_STYLES),
             "card_pattern": _enum(
                 raw.get("card_pattern", base.get("card_pattern")), config.ORG_CARD_PATTERNS),
+            "card_ink": _enum(
+                raw.get("card_ink", base.get("card_ink")), config.ORG_CARD_INKS),
+            "card_corner": _enum(
+                raw.get("card_corner", base.get("card_corner")), config.ORG_CARD_CORNERS),
+            "card_corner_pos": _enum(
+                raw.get("card_corner_pos", base.get("card_corner_pos")),
+                config.ORG_CARD_CORNER_POSITIONS),
+            "card_banner": _enum(
+                raw.get("card_banner", base.get("card_banner")), config.ORG_CARD_BANNERS),
+            "card_scene": _enum(
+                raw.get("card_scene", base.get("card_scene")), config.ORG_CARD_SCENES),
             "notes": _clean(raw.get("notes", base.get("notes", "")), config.ORG_NOTES_MAX),
             "domains": _coerce_domains(raw.get("domains", base.get("domains", []))),
             "contacts": _coerce_contacts(raw.get("contacts", base.get("contacts", []))),

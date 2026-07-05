@@ -74,6 +74,37 @@ class CoerceTests(unittest.TestCase):
         updated = store.update(org["id"], {"name": "A2"})
         self.assertEqual((updated["card_style"], updated["card_pattern"]), ("filled", "grid"))
 
+    def test_card_decoration_fields_default_to_first(self):
+        org = _store().create({"name": "A"})
+        self.assertEqual(
+            (org["card_ink"], org["card_corner"], org["card_corner_pos"],
+             org["card_banner"], org["card_scene"]),
+            ("white", "none", "top-right", "none", "none"))
+
+    def test_card_decoration_fields_kept_and_clamped(self):
+        store = _store()
+        ok = store.create({"name": "A", "card_ink": "black", "card_corner": "star",
+                           "card_corner_pos": "bottom-right", "card_banner": "both",
+                           "card_scene": "wave", "card_pattern": "hatch"})
+        self.assertEqual(
+            (ok["card_ink"], ok["card_corner"], ok["card_corner_pos"],
+             ok["card_banner"], ok["card_scene"], ok["card_pattern"]),
+            ("black", "star", "bottom-right", "both", "wave", "hatch"))
+        # Unknown values clamp to the first entry of each tuple.
+        bad = store.create({"name": "B", "card_ink": "gold", "card_corner": "flag",
+                            "card_corner_pos": "left", "card_banner": "top",
+                            "card_scene": "rain"})
+        self.assertEqual(
+            (bad["card_ink"], bad["card_corner"], bad["card_corner_pos"],
+             bad["card_banner"], bad["card_scene"]),
+            ("white", "none", "top-right", "none", "none"))
+
+    def test_card_decoration_fields_preserved_on_update_when_omitted(self):
+        store = _store()
+        org = store.create({"name": "A", "card_ink": "black", "card_scene": "cloud"})
+        updated = store.update(org["id"], {"name": "A2"})
+        self.assertEqual((updated["card_ink"], updated["card_scene"]), ("black", "cloud"))
+
     def test_notes_default_empty_kept_and_capped(self):
         import config
         self.assertEqual(_store().create({"name": "A"})["notes"], "")

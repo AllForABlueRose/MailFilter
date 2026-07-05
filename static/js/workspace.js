@@ -120,7 +120,7 @@ function renderTray(){
                 e.stopPropagation();
                 removeFromTray(mail.id);
             });
-            card.querySelector('.card-corner').appendChild(remove);
+            card.querySelector('.card-corner-tags').appendChild(remove);
             body.appendChild(card);
         });
     }

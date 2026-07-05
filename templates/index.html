@@ -400,6 +400,41 @@
         <option value="lines">Lines</option>
         <option value="grid">Grid</option>
         <option value="checker">Checker</option>
+        <option value="hatch">Cross-hatch</option>
+        <option value="stripes">Stripes</option>
+        <option value="confetti">Confetti</option>
+      </select>
+
+      <label>Accent ink <span class="auto-form-hint">(filled cards: click to flip the text &amp; accents)</span></label>
+      <button type="button" id="orgCardInk" class="flip-btn org-ink-toggle" data-value="white"
+              onclick="toggleOrgInk()" title="Flip the filled-card ink between white and black">⬜ White ink</button>
+
+      <label for="orgCardCorner">Corner icon</label>
+      <div class="org-corner-field">
+        <select id="orgCardCorner" onchange="updateOrgPreview()">
+          <option value="none">None</option>
+          <option value="banner">Corner banner</option>
+          <option value="ribbon">Ribbon</option>
+          <option value="star">Star</option>
+        </select>
+        <button type="button" id="orgCardCornerPos" class="flip-btn org-corner-pos" data-value="top-right"
+                onclick="toggleOrgCornerPos()" title="Flip which corner the icon sits in">↗ Top-right</button>
+      </div>
+
+      <label for="orgCardBanner">Edge banner</label>
+      <select id="orgCardBanner" onchange="updateOrgPreview()">
+        <option value="none">None</option>
+        <option value="bottom">Bottom</option>
+        <option value="right">Right side</option>
+        <option value="both">Bottom + right</option>
+      </select>
+
+      <label for="orgCardScene">Bottom scene</label>
+      <select id="orgCardScene" onchange="updateOrgPreview()">
+        <option value="none">None</option>
+        <option value="wave">Waves</option>
+        <option value="cloud">Clouds</option>
+        <option value="wind">Wind</option>
       </select>
 
       <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later; colour follows the card colour, override below)</span></label>
@@ -630,7 +665,7 @@
 </div>
 
 <div id="suspectedCustomersModal" class="modal-overlay" hidden>
-  <div class="modal">
+  <div class="modal suspected-modal">
     <div class="modal-header">
       <h2>Suspected Customers List</h2>
       <button class="icon-btn" onclick="closeSuspectedCustomers()" title="Close">✕</button>
@@ -697,8 +732,15 @@
       <button class="icon-btn" onclick="closeVaultEntry()" title="Close">✕</button>
     </div>
     <div class="modal-body auto-form">
-      <label for="vaultEntryOrg">Organization</label>
-      <select id="vaultEntryOrg"></select>
+      <label for="vaultEntryOrgInput">Organization</label>
+      <div class="vault-org-combo">
+        <input type="text" id="vaultEntryOrgInput" autocomplete="off"
+               placeholder="Type to filter organizations…"
+               oninput="filterVaultOrgOptions()" onfocus="openVaultOrgList()"
+               onkeydown="vaultOrgKeydown(event)" onblur="vaultOrgBlur()">
+        <input type="hidden" id="vaultEntryOrg">
+        <ul id="vaultEntryOrgList" class="vault-org-list" hidden></ul>
+      </div>
 
       <label for="vaultEntryLabel">Label</label>
       <input type="text" id="vaultEntryLabel" maxlength="120" placeholder="e.g. FTP login, Portal password">

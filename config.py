@@ -155,9 +155,21 @@ ORG_CATEGORY_MAX = 60
 # Org-card appearance (Customer Management). `card_style` swaps the card between
 # the default outline look (white fill, coloured text/border) and a filled look
 # (the org colour as background, white text/border); `card_pattern` overlays a
-# subtle, uniform texture. Both are coerced to the first entry when unknown.
+# subtle, uniform texture. Each is coerced to the first entry when unknown.
 ORG_CARD_STYLES = ("outline", "filled")
-ORG_CARD_PATTERNS = ("none", "dots", "lines", "grid", "checker")
+ORG_CARD_PATTERNS = ("none", "dots", "lines", "grid", "checker", "hatch", "stripes", "confetti")
+# `card_ink` is the click-to-flip toggle for a filled card's "on-colour" ink:
+# `white` (the default) or `black`. It drives the --ink CSS var, so the filled
+# card's text/border/pattern and every decoration below flip in one switch.
+ORG_CARD_INKS = ("white", "black")
+# `card_corner` paints a decoration in one card corner; `card_corner_pos` chooses
+# which corner. `card_banner` runs an accent strip along the bottom, right, or
+# both edges. `card_scene` fills the card's bottom half with a soft motif. All
+# use the --deco colour (org colour on outline cards, --ink on filled ones).
+ORG_CARD_CORNERS = ("none", "banner", "ribbon", "star")
+ORG_CARD_CORNER_POSITIONS = ("top-right", "bottom-right")
+ORG_CARD_BANNERS = ("none", "bottom", "right", "both")
+ORG_CARD_SCENES = ("none", "wave", "cloud", "wind")
 # Free-text notes shown on the org card — things to be mindful of when dealing
 # with this organization. This is also the home for future per-organization
 # settings (they extend the coerced fields the same way), so the cap is generous.

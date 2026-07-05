@@ -40,15 +40,38 @@ function createCard(mail){
     // server: each action is "recent" (coloured) or "old" (>7 days, greyed).
     const corner = document.createElement('div');
     corner.className = 'card-corner';
+    // The emoji tags share one row; the tray-remove button (workspace.js) joins it.
+    const cornerTags = document.createElement('div');
+    cornerTags.className = 'card-corner-tags';
     const tags = mail.tags || {};
-    if(tags.marked){ corner.appendChild(makeTag('🎯', 'Marked', tags.marked)); }
-    if(tags.downloaded){ corner.appendChild(makeTag('📥', 'Attachments downloaded', tags.downloaded)); }
-    if(tags.links){ corner.appendChild(makeTag('🌐', 'Links opened', tags.links)); }
+    if(tags.marked){ cornerTags.appendChild(makeTag('🎯', 'Marked', tags.marked)); }
+    if(tags.downloaded){ cornerTags.appendChild(makeTag('📥', 'Attachments downloaded', tags.downloaded)); }
+    if(tags.links){ cornerTags.appendChild(makeTag('🌐', 'Links opened', tags.links)); }
     // A detected password (from the last Smart Password Detection scan). The
     // value itself lives in the resources area (renderPasswordGroup), not here.
-    if(mail.has_password){ corner.appendChild(makePasswordBadge()); }
+    if(mail.has_password){ cornerTags.appendChild(makePasswordBadge()); }
+    corner.appendChild(cornerTags);
+    // Below the emoji row: the sender's resolved customer-organization label(s),
+    // each a pill in that org's colour showing its display name (server-resolved).
+    if(mail.org_labels && mail.org_labels.length){ corner.appendChild(makeOrgLabels(mail.org_labels)); }
     card.appendChild(corner);
     return card;
+}
+
+// A right-aligned row of org pills, painted with each org's colour. The display
+// name is user input, so it is inserted as DOM text (the people-field rule).
+function makeOrgLabels(labels){
+    const row = document.createElement('div');
+    row.className = 'card-orgs';
+    labels.forEach(function(l){
+        const pill = document.createElement('span');
+        pill.className = 'org-label';
+        pill.textContent = l.name;
+        pill.title = l.name;
+        if(l.color){ pill.style.backgroundColor = l.color; }
+        row.appendChild(pill);
+    });
+    return row;
 }
 
 // The 🔑 badge shown on a card whose body contained a detected password.
