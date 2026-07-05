@@ -161,6 +161,11 @@ function createOrgCard(o, counts){
     const vaultBox = buildVaultInfoBox(o.vault);
     if(vaultBox) card.appendChild(vaultBox);
 
+    // Read-only recorded key-assignment habits (Unlock Station "Record Customer
+    // Key Assignment"). Fixed text, never editable.
+    const kaBox = buildKeyAssignmentBox(o.key_assignments);
+    if(kaBox) card.appendChild(kaBox);
+
     const c = counts || {member: 0, representative: 0};
     const overrides = (o.contacts || []).length;
     const foot = document.createElement("div");
@@ -210,6 +215,29 @@ function buildVaultInfoBox(vault){
             ? `Has temporary keys from ${vault.last_scan_dt} scan`
             : "Has temporary keys"));
     }
+    return box;
+}
+
+// The read-only recorded key-assignment patterns box (or null when none). Each
+// pattern says which kind of Key Vault key the Unlock Station used to unlock a
+// given file kind for this org, so "Smart Key Assignment and Unlock" can replay it.
+const KA_FILE_LABELS = {zip: "Zip files", excel: "Excel files"};
+const KA_SELECTOR_LABELS = {managed: "managed key", recent_temporary: "most recent temporary key"};
+function buildKeyAssignmentBox(assignments){
+    assignments = assignments || [];
+    if(!assignments.length) return null;
+    const box = document.createElement("div");
+    box.className = "org-vault-info org-keyassign-info";
+    box.title = "Recorded by the Unlock Station; replayed by Smart Key Assignment";
+    const lead = document.createElement("span");
+    lead.className = "org-vault-lead";
+    lead.textContent = "🗝 Key assignment habits";
+    box.appendChild(lead);
+    assignments.forEach(k => {
+        const file = KA_FILE_LABELS[k.file_kind] || k.file_kind;
+        const sel = KA_SELECTOR_LABELS[k.selector] || k.selector;
+        box.appendChild(makeVaultLine(`${file}: ${sel}`));
+    });
     return box;
 }
 
@@ -521,8 +549,10 @@ function openOrgBuilder(id){
     const vaultBody = document.getElementById("orgVaultInfoBody");
     vaultBody.innerHTML = "";
     const vaultBox = o ? buildVaultInfoBox(o.vault) : null;
-    if(vaultBox){ vaultBody.appendChild(vaultBox); vaultWrap.hidden = false; }
-    else { vaultWrap.hidden = true; }
+    const kaBox = o ? buildKeyAssignmentBox(o.key_assignments) : null;
+    if(vaultBox) vaultBody.appendChild(vaultBox);
+    if(kaBox) vaultBody.appendChild(kaBox);
+    vaultWrap.hidden = !(vaultBox || kaBox);
 
     updateOrgPreview();
     document.getElementById("orgMemberDomains").value = domainsForRole(o, "member");

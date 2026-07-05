@@ -47,3 +47,14 @@ let vaultSearch = "";            // current Password Manager search query (key v
 let vaultRevealAll = false;      // hovering the "reveal all" area reveals every key's value
 let vaultRevealAllPinned = false;// "reveal all" checkbox ticked: keep every key visible (session only)
 let vaultHoverId = null;         // entry id whose row is currently hovered (single-key hover reveal)
+
+// Unlock Station (Workshop slide-in panel: keys explorer over today's workspace files).
+let unlockOpen = false;          // is the slide-in panel open?
+let unlockOrgMeta = {};          // org_id -> {name, color, card_style, card_pattern} from /api/organizations
+let unlockKeyEntries = {};       // org_id -> [redacted key entry] shown in the key explorer (full list or search)
+let unlockFiles = [];            // last /api/workspace/files listing {name, kind, encrypted, org_id, org_name, source}
+let unlockWorkspaceExists = false;// whether today's workspace folder exists
+let unlockAssignments = {};      // filename -> assigned vault entry_id (drag-drop; re-drop overwrites)
+let unlockLastUnlocked = [];     // {org_id, file_kind, key_kind} from the last successful unlock (feeds Record)
+let unlockKeySearch = "";        // key-explorer search query
+let unlockFileSearch = "";       // file-explorer search query

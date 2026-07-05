@@ -16,7 +16,7 @@ from pathlib import Path
 
 import config
 
-from . import attach_meta, customers, outlook, util
+from . import customers, outlook, util, workspace_manifest
 
 log = logging.getLogger(__name__)
 
@@ -53,10 +53,13 @@ def save_attachments(store, items, append_org_name=False, orgs=None,
 
     Brute Force Resolve takes **priority**: when both resolve a mail, its keyword
     org overrides the sender org. The resolved org's name is appended to the file
-    stem (``_<org name>``) and — best-effort — embedded into the file's own bytes
-    via :func:`mailfilter.attach_meta.embed_org_metadata`, so org identity travels
-    with the file, not just the filename. A mail that resolves to no org is left
-    unchanged (no suffix, no embed).
+    stem (``_<org name>``) and recorded — for **every** saved file, org fields
+    blank when unresolved — in the folder's sidecar manifest
+    (:mod:`mailfilter.workspace_manifest`), so org identity travels with the file
+    (and survives later encryption) without touching the file's own bytes. A
+    manifest entry's presence is also the "downloaded by this app" signal Cleanup
+    keys off. A mail that resolves to no org still gets a (blank-org) manifest
+    entry, but no filename suffix.
     """
     folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
     folder.mkdir(parents=True, exist_ok=True)
@@ -86,14 +89,16 @@ def save_attachments(store, items, append_org_name=False, orgs=None,
         org = bruteforce.get(mail_id) or sender.get(mail_id)
         if org and org["org_name"]:
             name = append_stem(name, org["org_name"])
-        # Stamp *every* download with the marker (org fields blank when unresolved),
-        # so "Cleanup Local Workspace" can tell app files from incidental ones.
-        blob = attach_meta.embed_org_metadata(name, blob, {
+        target = unique_path(folder, name, index)
+        target.write_bytes(blob)
+        # Record *every* download in the folder manifest (org fields blank when
+        # unresolved), so "Cleanup Local Workspace" and the Unlock Station can tell
+        # app files from incidental ones and read each file's org without decoding
+        # its bytes (which fails once the file is encrypted).
+        workspace_manifest.record(str(folder), target.name, {
             "org_id": org["org_id"] if org else "",
             "org_name": org["org_name"] if org else "",
             "mail_id": mail_id})
-        target = unique_path(folder, name, index)
-        target.write_bytes(blob)
         saved.append({"id": mail_id, "index": index, "name": target.name})
 
     log.info("Saved %d attachment(s) to %s (%d error(s))", len(saved), folder, len(errors))
@@ -210,31 +215,28 @@ def write_report(store, ids, mappings=None, orgs=None):
 def cleanup_workspace():
     """Delete this app's downloaded files from **today's** workspace folder.
 
-    Scans ``WORKSPACE_DIR/<YYYY-MM-DD>/`` and removes each regular file that carries
-    the app's embedded org marker (:func:`attach_meta.has_org_metadata`) — every
-    download is stamped with it, so incidental files that were never downloaded
-    through the app have no marker and are left in place. Returns
-    ``(folder, deleted, kept)`` (lists of file names); a missing folder yields empty
-    lists. Never recurses into subdirectories.
+    Scans ``WORKSPACE_DIR/<YYYY-MM-DD>/`` and removes each regular file recorded in
+    the folder's sidecar manifest (:func:`workspace_manifest.is_app_file`) — every
+    download is recorded there, so incidental files a user placed in the folder are
+    absent from the manifest and left in place. The manifest file itself is never
+    reported or deleted as content; each deleted file is pruned from it (and the
+    manifest is removed once emptied). Returns ``(folder, deleted, kept)`` (lists of
+    file names); a missing folder yields empty lists. Never recurses into
+    subdirectories.
     """
     folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
     deleted, kept = [], []
     if not folder.is_dir():
         return str(folder), deleted, kept
     for entry in sorted(folder.iterdir()):
-        if not entry.is_file():
+        if not entry.is_file() or entry.name == config.WORKSPACE_MANIFEST_NAME:
             continue
-        try:
-            blob = entry.read_bytes()
-        except OSError as e:
-            log.warning("Cleanup: cannot read %s: %s", entry, e)
-            kept.append(entry.name)
-            continue
-        if not attach_meta.has_org_metadata(entry.name, blob):
+        if not workspace_manifest.is_app_file(str(folder), entry.name):
             kept.append(entry.name)
             continue
         try:
             entry.unlink()
+            workspace_manifest.remove(str(folder), entry.name)
             deleted.append(entry.name)
         except OSError as e:
             log.warning("Cleanup: cannot delete %s: %s", entry, e)

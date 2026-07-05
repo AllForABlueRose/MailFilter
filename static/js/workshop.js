@@ -64,9 +64,11 @@ function renderVaultPanel(){
             + "Install it (see requirements.txt) to enable encrypted key storage."));
         return;
     }
-    if(!s.initialized){ panel.appendChild(buildCreateForm(() => loadMail())); return; }
-    if(!s.unlocked){ panel.appendChild(buildUnlockForm(() => loadMail())); return; }
+    if(!s.initialized){ panel.appendChild(buildCreateForm(() => loadMail())); syncUnlockStation(); return; }
+    if(!s.unlocked){ panel.appendChild(buildUnlockForm(() => loadMail())); syncUnlockStation(); return; }
     panel.appendChild(buildUnlockedView());
+    // The Unlock Station dock/panel only exists while the vault is unlocked.
+    syncUnlockStation();
 }
 
 // `onDone` runs after a successful create/unlock (e.g. hide the login overlay and

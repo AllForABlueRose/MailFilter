@@ -166,19 +166,19 @@ function updateTrayActions(){
 
 // Reflect the 🔗/⬇ "only new" scroll mode: a ⭐ star badge (the `only-new` class)
 // and a title that explains the active mode. Called from updateTrayActions so the
-// state survives every re-render, and after a scroll toggles the mode.
+// state survives every re-render, and after a scroll cycles the mode.
 function syncTrayModeButtons(){
     const links = document.getElementById('trayLinksBtn');
     links.classList.toggle('only-new', trayLinksOnlyNew);
     links.title = trayLinksOnlyNew
-        ? 'Open only NEW mail item links (skip items whose links were already opened) — scroll up to switch back'
-        : 'Open every link of the items here in new tabs — scroll down for "only new"';
+        ? 'Open only NEW mail item links (skip items whose links were already opened) — scroll to switch back'
+        : 'Open every link of the items here in new tabs — scroll to cycle to "only new"';
 
     const download = document.getElementById('trayDownloadBtn');
     download.classList.toggle('only-new', trayDownloadOnlyNew);
     download.title = trayDownloadOnlyNew
-        ? 'Download only NEW mail item attachments (skip already-downloaded items) — scroll up to switch back'
-        : 'Download every attachment of the items here — scroll down for "only new"';
+        ? 'Download only NEW mail item attachments (skip already-downloaded items) — scroll to switch back'
+        : 'Download every attachment of the items here — scroll to cycle to "only new"';
 }
 
 // `received` is "%Y-%m-%d %H:%M:%S", so a lexical compare is also chronological.

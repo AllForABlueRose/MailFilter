@@ -156,7 +156,10 @@ class RouteTests(unittest.TestCase):
             from datetime import datetime
             folder = downloads / datetime.now().strftime("%Y-%m-%d")
             self.assertTrue(folder.is_dir())
-            self.assertEqual(len(list(folder.iterdir())), 2)
+            # Two saved attachments plus the sidecar org manifest.
+            saved_files = [p.name for p in folder.iterdir()
+                           if p.name != config.WORKSPACE_MANIFEST_NAME]
+            self.assertEqual(len(saved_files), 2)
         finally:
             config.WORKSPACE_DIR = orig
 
@@ -195,17 +198,16 @@ class RouteTests(unittest.TestCase):
 
     def test_workspace_cleanup_deletes_only_app_files(self):
         from datetime import datetime
-        from mailfilter import attach_meta, imgcodec
+        from mailfilter import workspace_manifest
         out = Path(self._tmpdir) / "wclean"
         orig = config.WORKSPACE_DIR
         config.WORKSPACE_DIR = out
         try:
             folder = out / datetime.now().strftime("%Y-%m-%d")
             folder.mkdir(parents=True)
-            app_file = attach_meta.embed_org_metadata(
-                "app.png", imgcodec.encode(b"downloaded-through-the-app!!"),
-                {"org_id": "", "org_name": "", "mail_id": "m1"})
-            (folder / "app.png").write_bytes(app_file)
+            (folder / "app.png").write_bytes(b"downloaded-through-the-app!!")
+            workspace_manifest.record(str(folder), "app.png",
+                                      {"org_id": "", "org_name": "", "mail_id": "m1"})
             (folder / "notes.txt").write_text("incidental file")
 
             resp = self.client.post("/api/workspace/cleanup")

@@ -78,20 +78,27 @@ async function init(){
     collectWheel.addEventListener('click', collectFocused);
     collectWheel.addEventListener('dblclick', collectAllDisplayed);  // collect every displayed mail
 
-    // Scroll over the 🔗 / ⬇ tray buttons to flip the "only new" variant (starred
-    // icon): scroll down engages it, scroll up switches back. Directional (not a
-    // toggle) so a trackpad emitting many wheel events lands in a predictable state.
+    // Scroll over the 🔗 / ⬇ tray buttons to cycle the "only new" variant (starred
+    // icon): each scroll gesture — up or down — flips to the next mode. Debounced so
+    // a trackpad emitting many wheel events per gesture counts as a single step,
+    // keeping the landing state predictable.
+    let lastTrayModeWheel = 0;
+    const cycleTrayMode = flip => {
+        const now = Date.now();
+        if(now - lastTrayModeWheel < 200) return;
+        lastTrayModeWheel = now;
+        flip();
+        syncTrayModeButtons();
+    };
     const trayLinksBtn = document.getElementById('trayLinksBtn');
     trayLinksBtn.addEventListener('wheel', e => {
         e.preventDefault();
-        trayLinksOnlyNew = e.deltaY > 0;
-        syncTrayModeButtons();
+        cycleTrayMode(() => { trayLinksOnlyNew = !trayLinksOnlyNew; });
     }, {passive: false});
     const trayDownloadBtn = document.getElementById('trayDownloadBtn');
     trayDownloadBtn.addEventListener('wheel', e => {
         e.preventDefault();
-        trayDownloadOnlyNew = e.deltaY > 0;
-        syncTrayModeButtons();
+        cycleTrayMode(() => { trayDownloadOnlyNew = !trayDownloadOnlyNew; });
     }, {passive: false});
 
     // The regex compiler accepts dragged segments (people, links, filenames,

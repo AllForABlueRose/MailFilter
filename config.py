@@ -31,6 +31,20 @@ TEMPLATES_DIR = BASE_DIR / "search_templates"
 # attachment downloads remain streamed lazily from Outlook and are never
 # persisted (see outlook.fetch_attachment).
 WORKSPACE_DIR = BASE_DIR / "workspace"
+# Per-folder sidecar manifest recording the customer organization of every file
+# this app downloaded into a dated workspace folder ({filename: {org_id, org_name,
+# mail_id}}). It replaces the old "embed org metadata into each file's own bytes"
+# approach (which could not mark an encrypted .xlsx and failed on an encrypted
+# .zip). It lives INSIDE the dated folder and is folder-specific, encoded at rest
+# through the ordinary DPAPI/base64 seam like the other non-secret caches. Its
+# presence for a file is the "downloaded by this app" signal Cleanup uses; a file
+# on disk but absent from the manifest is treated as user-placed (no org). See
+# mailfilter/workspace_manifest.py. The leading dot keeps it out of casual view.
+WORKSPACE_MANIFEST_NAME = ".mailanalyzer_workspace.json"
+# Name of the transient subfolder the Unlock Station extracts a zip into before
+# moving the decompressed file(s) up into the dated workspace folder and deleting
+# the archive + this folder (see mailfilter/unlock_ops.py).
+UNLOCK_EXTRACT_DIRNAME = "._unlock_extract"
 # User-defined automations (saved-search workflows that run periodically). Same
 # encoded-at-rest JSON format as the other stores (see mailfilter/automation_store.py).
 AUTOMATIONS_FILE = BASE_DIR / "automations_cache.json"
@@ -150,6 +164,15 @@ ORG_CARD_PATTERNS = ("none", "dots", "lines", "grid", "checker")
 ORG_NOTES_MAX = 2000
 ORG_DOMAIN_MAX = 255
 ORG_EMAIL_MAX = 320
+# Recorded key-assignment patterns (Unlock Station "Record Customer Key
+# Assignment"): per org, which kind of Key Vault key was used to unlock each kind
+# of file, so "Smart Key Assignment and Unlock" can replay the habit. A pattern is
+# {file_kind, selector, recorded}: `file_kind` is which workspace file it applies
+# to, `selector` is which key to reach for. One pattern per file_kind (latest
+# wins). `recent_temporary` = the org's newest Smart-Password-captured key.
+ORG_KEY_ASSIGNMENT_FILE_KINDS = ("zip", "excel")
+ORG_KEY_ASSIGNMENT_SELECTORS = ("managed", "recent_temporary")
+ORG_KEY_ASSIGNMENTS_MAX = 10
 
 # Incremental fetch lookback. The fetch scans the inbox newest-first and stops
 # once it drops this far below the newest message already cached. A bare

@@ -88,6 +88,30 @@ def _coerce_contacts(raw):
     return out
 
 
+def _coerce_key_assignments(raw):
+    """Normalize ``[{file_kind, selector, recorded}, ...]``: clamp the file kind and
+    selector to the known sets, keep the first (latest, since :meth:`record_key_assignment`
+    prepends) pattern per file kind, drop unknowns, and cap the list length."""
+    out, seen = [], set()
+    for entry in raw or []:
+        if not isinstance(entry, dict):
+            continue
+        file_kind = str(entry.get("file_kind") or "").strip().lower()
+        selector = str(entry.get("selector") or "").strip().lower()
+        if file_kind not in config.ORG_KEY_ASSIGNMENT_FILE_KINDS:
+            continue
+        if selector not in config.ORG_KEY_ASSIGNMENT_SELECTORS:
+            continue
+        if file_kind in seen:
+            continue
+        seen.add(file_kind)
+        out.append({"file_kind": file_kind, "selector": selector,
+                    "recorded": _clean(entry.get("recorded"), 32)})
+        if len(out) >= config.ORG_KEY_ASSIGNMENTS_MAX:
+            break
+    return out
+
+
 class CustomerStore:
 
     def __init__(self, cache_file):
@@ -210,6 +234,32 @@ class CustomerStore:
                     return True
         return False
 
+    def record_key_assignment(self, oid, file_kind, selector):
+        """Record that org ``oid`` unlocked a ``file_kind`` file with a ``selector``
+        key (the Unlock Station "Record Customer Key Assignment" action).
+
+        The new pattern replaces any existing one for the same file kind (latest
+        wins), so "Smart Key Assignment and Unlock" replays the most recent habit.
+        Returns the updated org, or ``None`` for an unknown org / invalid
+        file-kind / selector.
+        """
+        file_kind = str(file_kind or "").strip().lower()
+        selector = str(selector or "").strip().lower()
+        if file_kind not in config.ORG_KEY_ASSIGNMENT_FILE_KINDS:
+            return None
+        if selector not in config.ORG_KEY_ASSIGNMENT_SELECTORS:
+            return None
+        with self._lock:
+            org = self._items.get(oid)
+            if org is None:
+                return None
+            recorded = datetime.now().strftime(config.RECEIVED_FORMAT)
+            others = [k for k in org.get("key_assignments", []) if k.get("file_kind") != file_kind]
+            org["key_assignments"] = _coerce_key_assignments(
+                [{"file_kind": file_kind, "selector": selector, "recorded": recorded}] + others)
+            self._save()
+            return self._copy(org)
+
     # ----- internals -----
 
     def _drop_contact(self, email):
@@ -238,6 +288,7 @@ class CustomerStore:
         clone = dict(org)
         clone["domains"] = [dict(d) for d in org["domains"]]
         clone["contacts"] = [dict(c) for c in org["contacts"]]
+        clone["key_assignments"] = [dict(k) for k in org.get("key_assignments", [])]
         return clone
 
     def _coerce(self, raw, base=None, new=False):
@@ -285,6 +336,8 @@ class CustomerStore:
             "notes": _clean(raw.get("notes", base.get("notes", "")), config.ORG_NOTES_MAX),
             "domains": _coerce_domains(raw.get("domains", base.get("domains", []))),
             "contacts": _coerce_contacts(raw.get("contacts", base.get("contacts", []))),
+            "key_assignments": _coerce_key_assignments(
+                raw.get("key_assignments", base.get("key_assignments", []))),
             "created": created,
         }
 

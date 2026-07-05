@@ -1,6 +1,7 @@
 """Tests for mailfilter.workspace_ops: batch-attachment naming and CSV report,
 including the experimental "Append Customer Name To Downloads" and "Brute Force
-Resolve Customer Name" toggles, byte-embedding, and the report org column.
+Resolve Customer Name" toggles, the sidecar org manifest, and the report org
+column.
 
 Outlook is mocked (the bytes fetch) and WORKSPACE_DIR is redirected to a temp
 folder, so nothing touches Outlook or the real workspace.
@@ -14,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 import config
-from mailfilter import attach_meta, imgcodec, workspace_ops
+from mailfilter import workspace_manifest, workspace_ops
 from mailfilter.store import MailStore
 from tests.factories import make_mail
 
@@ -220,8 +221,9 @@ class SaveAttachmentsResolveTests(unittest.TestCase):
         self.assertEqual(by_id["m2"], "b_Globex Inc.pdf")
 
 
-class SaveAttachmentsEmbedTests(unittest.TestCase):
-    """Every download is stamped with the org marker (org fields blank if unresolved)."""
+class SaveAttachmentsManifestTests(unittest.TestCase):
+    """Every download is recorded in the folder manifest (org blank if unresolved),
+    and the file's own bytes are written verbatim (no embedding)."""
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -239,22 +241,22 @@ class SaveAttachmentsEmbedTests(unittest.TestCase):
     def tearDown(self):
         config.WORKSPACE_DIR = self._orig
 
-    def test_marker_written_on_every_download(self):
-        png = imgcodec.encode(b"a-source-image-payload-for-the-test!!")
+    def test_manifest_written_on_every_download(self):
+        raw = b"the-verbatim-attachment-bytes-for-the-test!!"
         items = [{"id": "m1", "index": 0}, {"id": "m2", "index": 0}]
         with mock.patch("mailfilter.outlook.fetch_attachment",
-                        side_effect=lambda mid, idx: ("pic.png", png)):
+                        side_effect=lambda mid, idx: ("pic.png", raw)):
             folder, saved, _errors = workspace_ops.save_attachments(
                 self.store, items, resolve_customer=True,
                 customer_mappings=self.mappings, orgs=self.orgs)
         by_id = {s["id"]: s["name"] for s in saved}
-        resolved = attach_meta.read_org_metadata(
-            by_id["m1"], (Path(folder) / by_id["m1"]).read_bytes())
-        unresolved = attach_meta.read_org_metadata(
-            by_id["m2"], (Path(folder) / by_id["m2"]).read_bytes())
-        # Resolved mail carries the org; unresolved mail is still stamped, org blank.
-        self.assertEqual(resolved, {"org_id": "2", "org_name": "Globex Inc", "mail_id": "m1"})
-        self.assertEqual(unresolved, {"org_id": "", "org_name": "", "mail_id": "m2"})
+        # File bytes are the raw attachment, untouched.
+        self.assertEqual((Path(folder) / by_id["m1"]).read_bytes(), raw)
+        # Resolved mail carries the org; unresolved mail is still recorded, org blank.
+        self.assertEqual(workspace_manifest.lookup(folder, by_id["m1"]),
+                         {"org_id": "2", "org_name": "Globex Inc", "mail_id": "m1"})
+        self.assertEqual(workspace_manifest.lookup(folder, by_id["m2"]),
+                         {"org_id": "", "org_name": "", "mail_id": "m2"})
 
 
 class WriteReportTests(unittest.TestCase):
@@ -312,7 +314,7 @@ class WriteReportTests(unittest.TestCase):
 
 
 class CleanupWorkspaceTests(unittest.TestCase):
-    """cleanup_workspace deletes only marker-bearing (app-downloaded) files."""
+    """cleanup_workspace deletes only manifest-listed (app-downloaded) files."""
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -328,14 +330,13 @@ class CleanupWorkspaceTests(unittest.TestCase):
         folder.mkdir(parents=True, exist_ok=True)
         return folder
 
-    def test_deletes_marked_keeps_incidental(self):
+    def test_deletes_manifest_listed_keeps_incidental(self):
         folder = self._today_folder()
-        marked = attach_meta.embed_org_metadata(
-            "app.png", imgcodec.encode(b"app-downloaded-image-bytes!!"),
-            {"org_id": "", "org_name": "", "mail_id": "m1"})
-        (folder / "app.png").write_bytes(marked)
+        (folder / "app.png").write_bytes(b"app-downloaded-image-bytes!!")
+        workspace_manifest.record(str(folder), "app.png",
+                                  {"org_id": "", "org_name": "", "mail_id": "m1"})
         (folder / "notes.txt").write_text("a file the user dropped here")
-        (folder / "manual.png").write_bytes(imgcodec.encode(b"no-marker-here"))
+        (folder / "manual.png").write_bytes(b"no-manifest-entry-here")
 
         rfolder, deleted, kept = workspace_ops.cleanup_workspace()
 
@@ -345,6 +346,8 @@ class CleanupWorkspaceTests(unittest.TestCase):
         self.assertFalse((folder / "app.png").exists())
         self.assertTrue((folder / "notes.txt").exists())
         self.assertTrue((folder / "manual.png").exists())
+        # The emptied manifest is pruned away entirely.
+        self.assertFalse((folder / config.WORKSPACE_MANIFEST_NAME).exists())
 
     def test_missing_folder_is_a_noop(self):
         folder, deleted, kept = workspace_ops.cleanup_workspace()
@@ -354,9 +357,10 @@ class CleanupWorkspaceTests(unittest.TestCase):
     def test_ignores_subdirectories(self):
         folder = self._today_folder()
         (folder / "sub").mkdir()
-        (folder / "sub" / "inner.png").write_bytes(
-            attach_meta.embed_org_metadata("inner.png", imgcodec.encode(b"x"),
-                                           {"org_id": "", "org_name": "", "mail_id": "z"}))
+        (folder / "sub" / "inner.png").write_bytes(b"x")
+        # Even if a subdir file were somehow recorded, cleanup never recurses.
+        workspace_manifest.record(str(folder), "inner.png",
+                                  {"org_id": "", "org_name": "", "mail_id": "z"})
         _f, deleted, kept = workspace_ops.cleanup_workspace()
         self.assertEqual(deleted, [])                 # subdir not recursed
         self.assertTrue((folder / "sub" / "inner.png").exists())

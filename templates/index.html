@@ -682,6 +682,12 @@
          unlock / unlocked-list. -->
     <div id="vaultPanel" class="vault-panel"></div>
   </div>
+
+  <!-- Unlock Station: a bottom-right dock (toggle + action buttons) and a slide-in
+       panel (key explorer over today's workspace files). Built by unlockstation.js,
+       shown only while the vault is unlocked. Lives inside #view-workshop so it is
+       hidden automatically when another tab is active. -->
+  <div id="unlockRoot"></div>
 </section>
 
 <div id="vaultEntryModal" class="modal-overlay" hidden>
@@ -740,6 +746,7 @@
 <script src="{{ url_for('static', filename='js/customermatch.js') }}"></script>
 <script src="{{ url_for('static', filename='js/experimental.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workshop.js') }}"></script>
+<script src="{{ url_for('static', filename='js/unlockstation.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

@@ -29,7 +29,9 @@ from . import (
     password_detect,
     shared_mailbox,
     spreadsheet,
+    unlock_ops,
     util,
+    workspace_manifest,
     workspace_ops,
 )
 from .filters import MailQuery, filter_mails
@@ -388,12 +390,143 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     def api_workspace_cleanup():
         """Delete this app's downloaded files from today's workspace folder.
 
-        No body. Only files carrying the app's embedded org marker are removed
-        (:func:`attach_meta.has_org_metadata`); incidental files are left in place.
-        Returns the folder, the deleted file names, and how many were kept.
+        No body. Only files recorded in the folder's sidecar manifest
+        (:func:`workspace_manifest.is_app_file`) are removed; incidental files a
+        user placed in the folder are left in place. Returns the folder, the
+        deleted file names, and how many were kept.
         """
         folder, deleted, kept = workspace_ops.cleanup_workspace()
         return jsonify({"folder": folder, "deleted": deleted, "kept_count": len(kept)})
+
+    # ----- Unlock Station (Key Vault ⇄ workspace files) -----
+
+    def _vault_entry_index():
+        """`{entry_id: redacted_entry}` across every org (requires unlocked)."""
+        idx = {}
+        for items in vault_store.entries_by_org().values():
+            for e in items:
+                idx[e["id"]] = e
+        return idx
+
+    def _build_unlock_assignments(files, resolve_entry_id, entry_idx):
+        """Turn the workspace file list into the engine's ``{filename: assignment}``.
+
+        ``resolve_entry_id(file) -> entry_id|None`` decides which key (if any) a
+        file gets — the client's drag map for a manual unlock, or a recorded org
+        pattern for the smart pass. Only zips (with or without a key) and Excel
+        files that actually got a key are included; other files are left alone.
+        """
+        assignments = {}
+        for f in files:
+            entry_id = resolve_entry_id(f)
+            secret, key_kind = None, None
+            if entry_id and entry_id in entry_idx:
+                secret = vault_store.reveal(entry_id)
+                key_kind = entry_idx[entry_id].get("kind")
+            if f["kind"] == "zip":
+                pass  # zips are always processed, key or not
+            elif f["kind"] == "excel" and secret is not None:
+                pass  # Excel only when a key was assigned
+            else:
+                continue
+            assignments[f["name"]] = {
+                "secret": secret, "org_id": f["org_id"], "org_name": f["org_name"],
+                "key_kind": key_kind, "file_kind": f["kind"],
+            }
+        return assignments
+
+    @bp.get("/api/workspace/files")
+    def api_workspace_files():
+        """List today's workspace files for the Unlock Station (see unlock_ops)."""
+        return jsonify(unlock_ops.list_workspace_files())
+
+    @bp.post("/api/workspace/unlock")
+    def api_workspace_unlock():
+        """Unlock the workspace files using the client's key assignments.
+
+        Body ``{assignments: {filename: entry_id|null}}``. Requires the vault
+        unlocked (**423** otherwise) since it reads secrets. Zips are unzipped with
+        or without a key; Excel files are decrypted only when a key was dropped on
+        them. Returns the engine result (``unlocked`` + per-file ``errors``).
+        """
+        if not vault_store.is_unlocked():
+            return jsonify({"error": "vault locked"}), 423
+        body = request.get_json(silent=True) or {}
+        client = body.get("assignments") or {}
+        listing = unlock_ops.list_workspace_files()
+        if not listing["exists"]:
+            return jsonify({"error": "no workspace folder for today",
+                            "unlocked": [], "errors": []}), 404
+        entry_idx = _vault_entry_index()
+        assignments = _build_unlock_assignments(
+            listing["files"], lambda f: client.get(f["name"]), entry_idx)
+        return jsonify(unlock_ops.unlock_files(assignments))
+
+    def _selector_for_key_kind(key_kind):
+        """Map a used key's kind to the recorded selector, or None if unrecordable."""
+        if key_kind == "managed":
+            return "managed"
+        if key_kind == "temporary":
+            return "recent_temporary"
+        return None
+
+    @bp.post("/api/workspace/record-assignment")
+    def api_workspace_record_assignment():
+        """Record each successful unlock as a per-org key-assignment pattern.
+
+        Body ``{records: [{org_id, file_kind, key_kind}]}`` (from the client's last
+        unlock). ``key_kind`` (managed/temporary) becomes the stored selector. No
+        secrets involved, so no unlock gate. Returns the org ids updated.
+        """
+        body = request.get_json(silent=True) or {}
+        updated = []
+        for r in body.get("records") or []:
+            if not isinstance(r, dict):
+                continue
+            selector = _selector_for_key_kind(r.get("key_kind"))
+            if selector is None:
+                continue
+            org = customer_store.record_key_assignment(
+                r.get("org_id"), r.get("file_kind"), selector)
+            if org is not None:
+                updated.append(org["id"])
+        return jsonify({"recorded": updated})
+
+    @bp.post("/api/workspace/smart-unlock")
+    def api_workspace_smart_unlock():
+        """Auto-assign keys from each org's recorded pattern, then unlock.
+
+        For every workspace file whose org has a recorded pattern for that file
+        kind, pick the concrete key (``managed`` = the org's first managed key;
+        ``recent_temporary`` = its newest captured temporary key) and run the same
+        engine as a manual unlock. Requires the vault unlocked (**423**).
+        """
+        if not vault_store.is_unlocked():
+            return jsonify({"error": "vault locked"}), 423
+        listing = unlock_ops.list_workspace_files()
+        if not listing["exists"]:
+            return jsonify({"error": "no workspace folder for today",
+                            "unlocked": [], "errors": []}), 404
+        by_org = vault_store.entries_by_org()
+        entry_idx = {e["id"]: e for items in by_org.values() for e in items}
+        orgs = {o["id"]: o for o in customer_store.snapshot()}
+
+        def resolve_entry_id(f):
+            org = orgs.get(f["org_id"])
+            if not org:
+                return None
+            pattern = next((k for k in org.get("key_assignments", [])
+                            if k.get("file_kind") == f["kind"]), None)
+            if not pattern:
+                return None
+            want = "managed" if pattern["selector"] == "managed" else "temporary"
+            # entries_by_org orders managed-first then temporary newest-first, so the
+            # first match of the wanted kind is exactly the recorded selector.
+            match = next((e for e in by_org.get(f["org_id"], []) if e.get("kind") == want), None)
+            return match["id"] if match else None
+
+        assignments = _build_unlock_assignments(listing["files"], resolve_entry_id, entry_idx)
+        return jsonify(unlock_ops.unlock_files(assignments))
 
     # ----- Automations -----
 

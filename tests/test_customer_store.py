@@ -278,5 +278,44 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual([o["name"] for o in store.snapshot()], ["Good"])
 
 
+class KeyAssignmentTests(unittest.TestCase):
+    """The Unlock Station's recorded key-assignment patterns on an org."""
+
+    def test_new_org_has_no_key_assignments(self):
+        self.assertEqual(_store().create({"name": "Acme"})["key_assignments"], [])
+
+    def test_record_and_latest_wins_per_file_kind(self):
+        store = _store()
+        org = store.create({"name": "Acme"})
+        store.record_key_assignment(org["id"], "zip", "managed")
+        updated = store.record_key_assignment(org["id"], "zip", "recent_temporary")
+        # One pattern per file kind, latest wins.
+        zips = [k for k in updated["key_assignments"] if k["file_kind"] == "zip"]
+        self.assertEqual(len(zips), 1)
+        self.assertEqual(zips[0]["selector"], "recent_temporary")
+
+    def test_record_rejects_invalid_kind_or_selector(self):
+        store = _store()
+        org = store.create({"name": "Acme"})
+        self.assertIsNone(store.record_key_assignment(org["id"], "pdf", "managed"))
+        self.assertIsNone(store.record_key_assignment(org["id"], "zip", "nonsense"))
+        self.assertIsNone(store.record_key_assignment("no-such-org", "zip", "managed"))
+
+    def test_coerce_drops_invalid_and_dedupes_and_preserved_on_update(self):
+        store = _store()
+        org = store.create({"name": "Acme", "key_assignments": [
+            {"file_kind": "zip", "selector": "managed"},
+            {"file_kind": "zip", "selector": "recent_temporary"},   # dup kind dropped
+            {"file_kind": "pdf", "selector": "managed"},            # invalid kind dropped
+            {"file_kind": "excel", "selector": "bogus"},            # invalid selector dropped
+        ]})
+        self.assertEqual(org["key_assignments"],
+                         [{"file_kind": "zip", "selector": "managed",
+                           "recorded": org["key_assignments"][0]["recorded"]}])
+        # An update that omits the field preserves it.
+        again = store.update(org["id"], {"name": "Acme Renamed"})
+        self.assertEqual(again["key_assignments"], org["key_assignments"])
+
+
 if __name__ == "__main__":
     unittest.main()

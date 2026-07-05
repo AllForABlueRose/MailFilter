@@ -1,0 +1,15 @@
+# Pinned runtime dependencies for Mail Analyzer 2.0.
+#
+# This file is the version-controlled manifest installed by
+#   python scripts/init_project.py
+# and mirrors the approved-packages table in docs/dependencies.md. Edit the pins
+# HERE (not in the script) to change a version; keep docs/dependencies.md in sync.
+#
+# pywin32 is Windows/Outlook-only. Its environment marker makes pip skip it on
+# non-Windows boxes, because the app is designed to run without Outlook.
+
+openpyxl==3.1.5
+pywin32==308; sys_platform == "win32"
+cryptography==49.0.0
+pyzipper==0.3.6
+msoffcrypto-tool==5.4.2
