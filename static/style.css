@@ -2277,15 +2277,16 @@ input.drop-target{
 .unlock-group-head{
     font-size:12px; font-weight:600; color:#374151; padding:2px 2px 6px; margin-bottom:4px;
 }
-.unlock-tiles, .unlock-file-tiles{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+.unlock-tiles, .unlock-file-tiles{ display:flex; flex-wrap:wrap; gap:8px; }
 .unlock-key-tile{
     width:120px; padding:8px; border-radius:10px; cursor:grab;
     background:rgba(255,255,255,.72); border:1px solid rgba(17,24,39,.12);
+    text-align:center;
 }
 .unlock-key-tile:active{ cursor:grabbing; }
 .unlock-key-icon{ font-size:20px; }
 .unlock-key-label{ font-size:12px; font-weight:600; margin-top:2px; word-break:break-word; }
-.unlock-key-meta{ display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; align-items:center; }
+.unlock-key-meta{ display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; align-items:center; justify-content:center; }
 .unlock-kind{ font-size:10px; padding:1px 6px; border-radius:999px; }
 .unlock-kind.kind-managed{ background:#dbeafe; color:#1e40af; }
 .unlock-kind.kind-temporary{ background:#fef3c7; color:#92400e; }
@@ -2298,6 +2299,7 @@ input.drop-target{
 .unlock-file-tile{
     width:150px; padding:10px; border-radius:10px; position:relative;
     background:rgba(255,255,255,.72); border:1px solid rgba(17,24,39,.12);
+    text-align:center;
 }
 .unlock-file-tile.drop-hover{ outline:2px dashed #2563eb; outline-offset:2px; }
 .unlock-file-icon{ font-size:24px; position:relative; display:inline-block; }
