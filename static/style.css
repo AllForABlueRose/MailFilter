@@ -556,6 +556,16 @@ h3{
 .person:hover .p-email{
     display:inline;
 }
+/* Highlight the exact name/email token while it is being dragged (req: drag
+   feedback). Keep a dragged email visible even without the hover. */
+.p-name.dragging,
+.p-email.dragging{
+    display:inline;
+    background:#fde68a;
+    color:#78350f;
+    border-radius:3px;
+    outline:1px solid #f59e0b;
+}
 /* Collapsed exclude sender/recipient fields and their toggle buttons. */
 .exclude-toggle{
     display:block;       /* own row, so it never shares a line with the next label */
@@ -723,6 +733,16 @@ input.drop-target{
 .card.clickable:hover{
     box-shadow:0 4px 14px rgba(37,99,235,0.25);
 }
+/* A list item currently held in the workspace tray is greyed to show it's already
+   collected. Hover still restores full opacity so it stays readable/clickable. */
+.card.in-workspace{
+    opacity:0.55;
+    filter:grayscale(0.5);
+}
+.card.in-workspace:hover{
+    opacity:1;
+    filter:none;
+}
 .modal-overlay{
     position:fixed;
     inset:0;
@@ -763,6 +783,7 @@ input.drop-target{
     align-items:center;
 }
 .flip-btn{
+    position:relative;
     width:auto;
     margin:0;
     padding:8px 14px;
@@ -776,6 +797,26 @@ input.drop-target{
 .flip-btn:disabled{
     opacity:0.45;
     cursor:not-allowed;
+}
+/* "Only new" scroll variant of the 🔗/⬇ tray buttons: the original icon plus a
+   star badge in the top-right corner. */
+.flip-btn.only-new::after{
+    content:'⭐';
+    position:absolute;
+    top:-4px;
+    right:-4px;
+    font-size:11px;
+    line-height:1;
+    pointer-events:none;
+}
+/* "Cleanup Local Workspace" armed state: the button turns red after the first
+   press to warn that a second press deletes files. */
+.flip-btn.armed{
+    background:#dc2626;
+    color:#fff;
+}
+.flip-btn.armed:hover{
+    background:#b91c1c;
 }
 /* The "Collect matching mails" hover popup. The wrapper anchors it; the popup
    is a single-symbol box that scrolls through the available labels. It sits
@@ -1493,10 +1534,41 @@ input.drop-target{
 }
 
 /* Suspected Customers List popup textarea (Resolve Customer Name To Downloads). */
-.suspected-customers-text{
+/* Brute Force Mail Deduplication: the notification-subject input. */
+.dedupe-subject{
     width:100%;
     box-sizing:border-box;
-    resize:vertical;
+    margin-top:6px;
+    font-family:inherit;
+    font-size:13px;
+}
+
+/* Suspected Customers List: keyword -> organization rows. */
+.suspected-rows{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-bottom:10px;
+}
+.suspected-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.suspected-keyword{
+    flex:1 1 auto;
+    min-width:0;
+    box-sizing:border-box;
+    font-family:inherit;
+    font-size:13px;
+}
+.suspected-arrow{
+    flex:0 0 auto;
+    opacity:0.6;
+}
+.suspected-org{
+    flex:1 1 auto;
+    min-width:0;
     font-family:inherit;
     font-size:13px;
 }

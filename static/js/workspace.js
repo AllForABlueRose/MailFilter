@@ -54,6 +54,45 @@ function clearTray(){
     renderTray();
 }
 
+// "Cleanup Local Workspace": a two-press guard on a destructive server action.
+// First press arms the button (it turns red); the second press asks the server to
+// delete every app-downloaded file (identified by its embedded org metadata) from
+// today's workspace folder. Incidental files are never touched. The armed state
+// auto-disarms after a few seconds so a stray red button can't linger.
+function cleanupLocalWorkspace(){
+    const btn = document.getElementById('trayCleanupBtn');
+    const status = document.getElementById('trayStatus');
+    if(!cleanupArmed){
+        cleanupArmed = true;
+        btn.classList.add('armed');
+        btn.title = 'Click again to permanently delete downloaded files in today’s workspace folder';
+        status.textContent = 'Click Cleanup again to confirm deletion of downloaded files.';
+        clearTimeout(cleanupArmTimer);
+        cleanupArmTimer = setTimeout(disarmCleanup, 4000);
+        return;
+    }
+    disarmCleanup();
+    status.textContent = 'Cleaning up local workspace...';
+    fetch('/api/workspace/cleanup', {method: 'POST'})
+        .then(r => r.json())
+        .then(result => {
+            const n = (result.deleted || []).length;
+            status.textContent = `Deleted ${n} downloaded file(s) from ${result.folder}`
+                + (result.kept_count ? ` — ${result.kept_count} other file(s) kept.` : '.');
+        })
+        .catch(() => { status.textContent = 'Cleanup failed.'; });
+}
+
+function disarmCleanup(){
+    cleanupArmed = false;
+    clearTimeout(cleanupArmTimer);
+    const btn = document.getElementById('trayCleanupBtn');
+    if(btn){
+        btn.classList.remove('armed');
+        btn.title = 'Cleanup Local Workspace: delete files downloaded through the app from today’s folder';
+    }
+}
+
 function renderTray(){
     const body = document.getElementById('trayBody');
     body.innerHTML = '';
@@ -87,6 +126,16 @@ function renderTray(){
     }
     document.getElementById('trayCount').textContent = `(${trayMails.length})`;
     updateTrayActions();
+    markWorkspaceCards();   // keep list greying in sync as the tray changes
+    disarmCleanup();        // any tray change cancels a pending cleanup confirm
+}
+
+// Grey out each main-list card whose mail is currently in the workspace tray. Only
+// touches #mailContainer (not the tray's own cards or the thread popup).
+function markWorkspaceCards(){
+    document.querySelectorAll('#mailContainer .card[data-mail-id]').forEach(card => {
+        card.classList.toggle('in-workspace', trayIds.has(card.dataset.mailId));
+    });
 }
 
 // Reflect the current tray contents in the action buttons: download/links are
@@ -111,6 +160,25 @@ function updateTrayActions(){
     sortBtn.title = traySortNewestFirst
         ? 'Sorted newest first — click for oldest first'
         : 'Sorted oldest first — click for newest first';
+
+    syncTrayModeButtons();
+}
+
+// Reflect the 🔗/⬇ "only new" scroll mode: a ⭐ star badge (the `only-new` class)
+// and a title that explains the active mode. Called from updateTrayActions so the
+// state survives every re-render, and after a scroll toggles the mode.
+function syncTrayModeButtons(){
+    const links = document.getElementById('trayLinksBtn');
+    links.classList.toggle('only-new', trayLinksOnlyNew);
+    links.title = trayLinksOnlyNew
+        ? 'Open only NEW mail item links (skip items whose links were already opened) — scroll up to switch back'
+        : 'Open every link of the items here in new tabs — scroll down for "only new"';
+
+    const download = document.getElementById('trayDownloadBtn');
+    download.classList.toggle('only-new', trayDownloadOnlyNew);
+    download.title = trayDownloadOnlyNew
+        ? 'Download only NEW mail item attachments (skip already-downloaded items) — scroll up to switch back'
+        : 'Download every attachment of the items here — scroll down for "only new"';
 }
 
 // `received` is "%Y-%m-%d %H:%M:%S", so a lexical compare is also chronological.
@@ -151,12 +219,20 @@ function toggleTrayMark(){
 // Save every attachment of the collected mails into a dated folder on the
 // server (no browser "Save As" dialog) — one at a time, server-side.
 function downloadTrayAttachments(){
+    // "Only new" mode (scroll the ⬇ button): skip mails already tagged 📥 downloaded.
+    const mails = trayDownloadOnlyNew
+        ? trayMails.filter(m => !(m.tags && m.tags.downloaded))
+        : trayMails;
     // Use each attachment's original index (blacklisted ones are already absent
     // from the view model, so they're naturally skipped here).
     const items = [];
-    trayMails.forEach(m => (m.attachments || []).forEach(att => items.push({id: m.id, index: att.index})));
+    mails.forEach(m => (m.attachments || []).forEach(att => items.push({id: m.id, index: att.index})));
     const status = document.getElementById('trayStatus');
-    if(!items.length){ status.textContent = 'No attachments to download.'; return; }
+    if(!items.length){
+        status.textContent = trayDownloadOnlyNew
+            ? 'No new attachments to download.' : 'No attachments to download.';
+        return;
+    }
     status.textContent = `Downloading ${items.length} attachment(s)...`;
     fetch('/api/download', {
         method: 'POST',
@@ -197,8 +273,18 @@ function exportTrayReport(){
 // string -> browsers open tabs (not popups), so they aren't blocked after the
 // first the way `window.open(url, '_blank', 'noopener')` was.
 function openTrayLinks(){
+    // "Only new" mode (scroll the 🔗 button): skip mails already tagged 🌐 links.
+    const mails = trayLinksOnlyNew
+        ? trayMails.filter(m => !(m.tags && m.tags.links))
+        : trayMails;
+    const status = document.getElementById('trayStatus');
+    if(!mails.length){
+        status.textContent = trayLinksOnlyNew
+            ? 'No new items with unopened links.' : 'No links to open.';
+        return;
+    }
     const opened = [];
-    trayMails.forEach(m => {
+    mails.forEach(m => {
         let any = false;
         (m.links || []).forEach(link => {
             const w = window.open(link.url, '_blank');
@@ -272,7 +358,7 @@ function renderCollectWheel(direction){
     wheel.innerHTML = '';
     if(!collectAvailable.length){
         wheel.classList.add('empty');
-        wheel.title = 'No labels in view';
+        wheel.title = 'No labels in view — double-click to collect all displayed mail';
         wheel.textContent = '∅';
         return;
     }
@@ -304,6 +390,21 @@ function collectByLabel(label){
     let added = false;
     Object.values(mailById).forEach(m => {
         if(labelMatches(m, label) && !trayIds.has(m.id)){
+            trayIds.add(m.id);
+            trayMails.push(m);
+            added = true;
+        }
+    });
+    closeCollectWheel();
+    if(added) renderTray();
+}
+
+// Double-click the wheel to collect *every* displayed mail — useful when nothing
+// carries a label (the ∅ state), where a single click has nothing to collect.
+function collectAllDisplayed(){
+    let added = false;
+    Object.values(mailById).forEach(m => {
+        if(!trayIds.has(m.id)){
             trayIds.add(m.id);
             trayMails.push(m);
             added = true;

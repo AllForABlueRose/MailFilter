@@ -43,6 +43,10 @@ DEFAULTS = {
     # Experimental (workspace, not search): append a Suspected Customers List name
     # found in a mail's content to batch-downloaded files. Also template-excluded.
     "resolve_customer_name": False,
+    # Experimental (Brute Force Mail Deduplication): the on/off toggle and the
+    # notification subject to detect. View-only transform; both template-excluded.
+    "dedupe": False,
+    "dedupe_subject": "",
 }
 
 # Per-string cap so a buggy/hostile client can't grow the file without bound.
@@ -54,7 +58,7 @@ MAX_LEN = 500
 # preset. `coerce_template` forces these back to their defaults on save, and the UI
 # re-applies the live values after switching to a template (see templates.js).
 TEMPLATE_EXCLUDED_FIELDS = ("start", "end", "normalize_width", "append_customer_name",
-                            "resolve_customer_name")
+                            "resolve_customer_name", "dedupe", "dedupe_subject")
 
 
 def coerce(raw, base=None):

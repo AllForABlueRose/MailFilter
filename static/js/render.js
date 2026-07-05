@@ -128,6 +128,10 @@ function personDragStart(e, value){
     e.stopPropagation();   // don't also start a card (workspace) drag
     e.dataTransfer.setData('text/x-mailfilter-person', value);
     e.dataTransfer.effectAllowed = 'copy';
+    // Highlight the exact name/email token being dragged, until the drag ends.
+    const el = e.currentTarget;
+    el.classList.add('dragging');
+    el.addEventListener('dragend', () => el.classList.remove('dragging'), {once: true});
 }
 
 // Links and attachment filenames are draggable into the regex compiler.

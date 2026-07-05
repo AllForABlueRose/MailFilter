@@ -76,6 +76,23 @@ async function init(){
     const collectWheel = document.getElementById('collectWheel');
     collectWheel.addEventListener('wheel', cycleCollect, {passive: false});
     collectWheel.addEventListener('click', collectFocused);
+    collectWheel.addEventListener('dblclick', collectAllDisplayed);  // collect every displayed mail
+
+    // Scroll over the 🔗 / ⬇ tray buttons to flip the "only new" variant (starred
+    // icon): scroll down engages it, scroll up switches back. Directional (not a
+    // toggle) so a trackpad emitting many wheel events lands in a predictable state.
+    const trayLinksBtn = document.getElementById('trayLinksBtn');
+    trayLinksBtn.addEventListener('wheel', e => {
+        e.preventDefault();
+        trayLinksOnlyNew = e.deltaY > 0;
+        syncTrayModeButtons();
+    }, {passive: false});
+    const trayDownloadBtn = document.getElementById('trayDownloadBtn');
+    trayDownloadBtn.addEventListener('wheel', e => {
+        e.preventDefault();
+        trayDownloadOnlyNew = e.deltaY > 0;
+        syncTrayModeButtons();
+    }, {passive: false});
 
     // The regex compiler accepts dragged segments (people, links, filenames,
     // plain text), each appended as its own line.

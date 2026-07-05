@@ -9,13 +9,18 @@ let normalizeWidth = false;      // experimental: fold full-width<->half-width o
 let attachmentSearch = false;    // experimental: main/exclude keyword match also covers attachment names
 let linkSearch = false;          // experimental: main/exclude keyword match also covers link URLs
 let appendCustomerName = false;  // experimental: append sender's org name to batch-downloaded files
-let resolveCustomerName = false; // experimental: append a Suspected Customers List name found in mail content
+let resolveCustomerName = false; // experimental: Brute Force Resolve — keyword->org mapping resolved from mail content
+let dedupe = false;              // experimental: Brute Force Mail Deduplication — hide Zendesk notification mails, graft their link onto the twin
 let experimentalEnabled = {};    // feature id -> bool, last loaded /api/experimental (which controls are mounted)
 
 let mailById = {};          // id -> view model from the last load (drag source)
 let trayMails = [];         // mails collected in the workspace
 const trayIds = new Set();
 let traySortNewestFirst = true;   // workspace sort direction (toggled by the button)
+let trayLinksOnlyNew = false;     // tray 🔗 button "only new" mode (skip mails already tagged links)
+let trayDownloadOnlyNew = false;  // tray ⬇ button "only new" mode (skip mails already tagged downloaded)
+let cleanupArmed = false;         // "Cleanup Local Workspace" two-press guard: armed (red) after first press
+let cleanupArmTimer = null;       // timeout id that auto-disarms the cleanup button
 
 let threadMails = [];       // mails shown in the thread/message popup
 let threadOldestFirst = true;

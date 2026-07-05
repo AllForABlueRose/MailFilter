@@ -51,6 +51,11 @@ class MailQuery:
     # attachment filenames and/or link URLs.
     attachment_search: bool = False
     link_search: bool = False
+    # Experimental (Brute Force Mail Deduplication): when on, mails whose subject
+    # exactly equals ``dedupe_subject`` are treated as Zendesk notifications; the
+    # transform runs in the route (routes.api_mail -> dedup.dedupe), not here.
+    dedupe: bool = False
+    dedupe_subject: str = ""
     errors: tuple = ()            # human-readable expression parse errors
 
     @classmethod
@@ -87,6 +92,8 @@ class MailQuery:
             normalize_width=args.get("normalize_width") in ("1", "true", "on"),
             attachment_search=args.get("attachment_search") in ("1", "true", "on"),
             link_search=args.get("link_search") in ("1", "true", "on"),
+            dedupe=args.get("dedupe") in ("1", "true", "on"),
+            dedupe_subject=args.get("dedupe_subject") or "",
             errors=tuple(errors),
         )
 

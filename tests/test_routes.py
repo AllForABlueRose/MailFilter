@@ -60,7 +60,7 @@ class RouteTests(unittest.TestCase):
     def test_index_renders(self):
         resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Mail Analyzer 2.0", resp.data)
+        self.assertIn(b"Mail Analyzer 3.0", resp.data)
 
     def test_api_mail_returns_mails_and_status(self):
         data = self.client.get("/api/mail").get_json()
@@ -182,14 +182,61 @@ class RouteTests(unittest.TestCase):
             self.assertIn(datetime.now().strftime("%Y-%m-%d"), data["name"])
             with saved.open(encoding="utf-8-sig", newline="") as f:
                 rows = list(csv.reader(f))
-            self.assertEqual(rows[0], ["Datetime", "subject", "recipient", "sender"])
+            self.assertEqual(rows[0], ["Datetime", "subject", "recipient", "sender",
+                                       "customer organization"])
+            # "Bob"/"Alice" are substrings of their emails -> the email is used.
             self.assertEqual(rows[1], ["2026-06-10 09:30:00", "alpha",
-                                       "Bob <bob@x.com>", "Alice <alice@x.com>"])
+                                       "bob@x.com", "alice@x.com", ""])
         finally:
             config.WORKSPACE_DIR = orig
 
     def test_report_rejects_non_object(self):
         self.assertEqual(self.client.post("/api/report", json=["x"]).status_code, 400)
+
+    def test_workspace_cleanup_deletes_only_app_files(self):
+        from datetime import datetime
+        from mailfilter import attach_meta, imgcodec
+        out = Path(self._tmpdir) / "wclean"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            folder = out / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True)
+            app_file = attach_meta.embed_org_metadata(
+                "app.png", imgcodec.encode(b"downloaded-through-the-app!!"),
+                {"org_id": "", "org_name": "", "mail_id": "m1"})
+            (folder / "app.png").write_bytes(app_file)
+            (folder / "notes.txt").write_text("incidental file")
+
+            resp = self.client.post("/api/workspace/cleanup")
+            data = resp.get_json()
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(data["deleted"], ["app.png"])
+            self.assertEqual(data["kept_count"], 1)
+            self.assertFalse((folder / "app.png").exists())
+            self.assertTrue((folder / "notes.txt").exists())
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_mail_dedupe_hides_notification_and_grafts_link(self):
+        self.store.add_mails([
+            make_mail(id="ORIG", subject="Server error report", body="Disk full on node 3",
+                      received="2026-06-10 09:30:00"),
+            make_mail(id="NOTE", subject="New ticket created", received="2026-06-10 09:40:00",
+                      body="Ticket opened.\nSubject: Server error report\n"
+                           "Body: Disk full on node 3\nSee https://zendesk.example/tickets/42"),
+        ])
+        # Off: both the original and the notification are present.
+        off = {m["id"] for m in self.client.get("/api/mail").get_json()["mails"]}
+        self.assertIn("NOTE", off)
+        self.assertIn("ORIG", off)
+        # On: the notification is hidden and its link is grafted onto the twin.
+        on = self.client.get(
+            "/api/mail?dedupe=1&dedupe_subject=New ticket created").get_json()["mails"]
+        by_id = {m["id"]: m for m in on}
+        self.assertNotIn("NOTE", by_id)
+        self.assertIn("https://zendesk.example/tickets/42",
+                      [l["url"] for l in by_id["ORIG"]["links"]])
 
     def test_download_reports_unknown_attachment(self):
         downloads = Path(self._tmpdir) / "downloads2"

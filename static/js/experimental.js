@@ -27,6 +27,9 @@ const EXPERIMENTAL_FEATURES = [
     {id: 'resolve_customer_name',
      isOn: () => resolveCustomerName,
      turnOff: () => { resolveCustomerName = false; syncResolveCustomerNameButton(); }},
+    {id: 'dedupe',
+     isOn: () => dedupe,
+     turnOff: () => { dedupe = false; syncDedupeButton(); }},
 ];
 
 // Load the enabled set and mount the matching controls. Called once at startup.

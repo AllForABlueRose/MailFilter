@@ -23,6 +23,7 @@ from . import (
     automation,
     bulk_compose,
     customers,
+    dedup,
     draft_ops,
     outlook,
     password_detect,
@@ -32,7 +33,7 @@ from . import (
     workspace_ops,
 )
 from .filters import MailQuery, filter_mails
-from .presenter import to_view_model
+from .presenter import extra_link_views, to_view_model
 
 log = logging.getLogger(__name__)
 
@@ -270,12 +271,26 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             # A malformed expression: show nothing and report why, rather than
             # filter on a half-understood query.
             return jsonify({"mails": [], "query_error": " | ".join(query.errors), **status})
-        mails = filter_mails(store.snapshot(), query)
-        return jsonify({
-            "mails": [view_model(m, query) for m in mails],
-            "query_error": "",
-            **status,
-        })
+        snap = store.snapshot()
+        mails = filter_mails(snap, query)
+        # Brute Force Mail Deduplication (experimental, view-only): computed over the
+        # full snapshot (a twin/notification may fall outside the current search),
+        # then projected onto the results — hide matched notifications, graft their
+        # link(s) onto the twin's view model.
+        hidden, twin_links = (set(), {})
+        if query.dedupe and query.dedupe_subject.strip():
+            hidden, twin_links = dedup.dedupe(snap, query.dedupe_subject)
+        out = []
+        for m in mails:
+            if m["id"] in hidden:
+                continue
+            view = view_model(m, query)
+            urls = twin_links.get(m["id"])
+            if urls:
+                view["links"] = view["links"] + extra_link_views(
+                    urls, query.main, query.optional, [l["url"] for l in view["links"]])
+            out.append(view)
+        return jsonify({"mails": out, "query_error": "", **status})
 
     @bp.get("/api/thread")
     def api_thread():
@@ -326,11 +341,13 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
         append = data.get("append_customer_name") in (True, "1", "true", "on")
         resolve = data.get("resolve_customer_name") in (True, "1", "true", "on")
-        orgs = customer_store.snapshot() if append else None
-        customer_names = customer_match_store.names() if resolve else None
+        # Orgs are needed for the sender resolver (append) and the keyword->org
+        # lookup (resolve/Brute Force), so fetch them when either toggle is on.
+        orgs = customer_store.snapshot() if (append or resolve) else None
+        customer_mappings = customer_match_store.mappings() if resolve else None
         folder, saved, errors = workspace_ops.save_attachments(
             store, data.get("items") or [], append_org_name=append, orgs=orgs,
-            resolve_customer=resolve, customer_names=customer_names)
+            resolve_customer=resolve, customer_mappings=customer_mappings)
         for mid in {s["id"] for s in saved}:
             tag_store.record(mid, "downloaded")
         return jsonify({"folder": folder, "saved": saved, "errors": errors})
@@ -353,16 +370,30 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         """Export a CSV report of the given mails into the dated workspace folder.
 
         Body: ``{"ids": [<mail id>, ...]}`` in the order to write. Columns, left
-        to right: ``Datetime, subject, recipient, sender``. The filename embeds
-        the creation date. Unknown ids are skipped. Returns the folder, the file
-        name, and the row count.
+        to right: ``Datetime, subject, recipient, sender, customer organization``.
+        The last column is resolved from the "Brute Force Resolve Customer Name"
+        keyword->org mappings. The filename embeds the creation date. Unknown ids
+        are skipped. Returns the folder, the file name, and the row count.
         """
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
 
-        folder, name, count = workspace_ops.write_report(store, data.get("ids") or [])
+        folder, name, count = workspace_ops.write_report(
+            store, data.get("ids") or [],
+            mappings=customer_match_store.mappings(), orgs=customer_store.snapshot())
         return jsonify({"folder": folder, "name": name, "count": count})
+
+    @bp.post("/api/workspace/cleanup")
+    def api_workspace_cleanup():
+        """Delete this app's downloaded files from today's workspace folder.
+
+        No body. Only files carrying the app's embedded org marker are removed
+        (:func:`attach_meta.has_org_metadata`); incidental files are left in place.
+        Returns the folder, the deleted file names, and how many were kept.
+        """
+        folder, deleted, kept = workspace_ops.cleanup_workspace()
+        return jsonify({"folder": folder, "deleted": deleted, "kept_count": len(kept)})
 
     # ----- Automations -----
 

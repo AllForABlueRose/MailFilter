@@ -120,13 +120,38 @@ def _attachments(mail, main_terms, optional_terms, blacklist):
     return out
 
 
+def _link_view(url, main_terms, optional_terms):
+    """One link as raw URL + a highlighted (escaped) variant for display."""
+    return {"url": url, "url_html": _highlight(html.escape(url), main_terms, optional_terms)}
+
+
 def _links(mail, main_terms, optional_terms, blacklist):
     """http(s) links as raw URL + a highlighted (escaped) variant for display."""
     out = []
     for url in mail.get("_links", []):
         if blacklist is not None and expr.evaluate(blacklist, url.lower()):
             continue
-        out.append({"url": url, "url_html": _highlight(html.escape(url), main_terms, optional_terms)})
+        out.append(_link_view(url, main_terms, optional_terms))
+    return out
+
+
+def extra_link_views(urls, main_node, optional_node, existing_urls=()):
+    """Build ``{url, url_html}`` views for extra links grafted onto a mail.
+
+    Used by the Brute Force Mail Deduplication transform (``routes.api_mail``) to
+    append a notification's link(s) to its twin's view model. Skips any URL already
+    present (``existing_urls``) and de-duplicates within ``urls``; keeps the escaping
+    here so the presenter stays the sole place stored mail becomes HTML.
+    """
+    main_terms = expr.operands(main_node)
+    optional_terms = expr.operands(optional_node)
+    seen = set(existing_urls)
+    out = []
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(_link_view(url, main_terms, optional_terms))
     return out
 
 

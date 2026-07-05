@@ -1,4 +1,4 @@
-"""Central configuration for the Mail Analyzer 2.0 app."""
+"""Central configuration for the Mail Analyzer 3.0 app."""
 
 from datetime import timedelta
 from pathlib import Path
@@ -309,6 +309,8 @@ PASSWORD_SCAN_MAX_AGE_DAYS = 30
 #   link_search       — extend the main/exclude keyword match to link URLs
 #   append_customer_name — append the sender's org name to batch-downloaded files
 #   resolve_customer_name — append a Suspected Customers List name found in content
+#   dedupe            — Brute Force Mail Deduplication (hide Zendesk notification
+#                       mails, graft their link onto the twin original mail)
 EXPERIMENTAL_DEFAULTS = {
     "passwords": False,
     "normalize_width": False,
@@ -316,7 +318,12 @@ EXPERIMENTAL_DEFAULTS = {
     "link_search": False,
     "append_customer_name": False,
     "resolve_customer_name": False,
+    "dedupe": False,
 }
+# Brute Force Mail Deduplication (experimental): the half-window, in minutes, around
+# a detected notification mail within which a "twin" original mail is looked for
+# (mailfilter/dedup.py). The request specifies one hour before and after.
+DEDUP_WINDOW_MINUTES = 60
 # Normalize Search Character Width: the Unicode normalization form used to fold
 # full-width (全角) and half-width (半角) variants of a character to one form so a
 # keyword search on one width also matches the other. NFKC maps full-width Latin/

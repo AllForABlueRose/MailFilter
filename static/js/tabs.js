@@ -7,7 +7,7 @@
 // purely client-side — no history/URL changes.
 
 const TAB_TITLES = {
-    mailfilter: "Mail Analyzer 2.0",
+    mailfilter: "Mail Analyzer 3.0",
     automations: "Automations",
     customers: "Customer Management",
     bulk: "Bulk Compose",

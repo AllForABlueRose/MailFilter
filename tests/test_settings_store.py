@@ -55,17 +55,23 @@ class UpdateTests(unittest.TestCase):
         out = self.store.update({"main": "x" * (MAX_LEN * 4)})
         self.assertEqual(len(out["main"]), MAX_LEN)
 
+    def test_dedupe_fields_round_trip(self):
+        out = self.store.update({"dedupe": "on", "dedupe_subject": "New ticket created"})
+        self.assertIs(out["dedupe"], True)                   # bool-typed
+        self.assertEqual(out["dedupe_subject"], "New ticket created")  # string-typed
+
 
 class CoerceTemplateTests(unittest.TestCase):
     def test_excluded_fields_reset_to_defaults(self):
         out = coerce_template({
             "main": "keep", "start": "2026-01-01T00:00", "end": "2026-02-01T00:00",
             "normalize_width": True, "resources": True,
+            "dedupe": True, "dedupe_subject": "New ticket created",
         })
         self.assertEqual(out["main"], "keep")        # ordinary fields kept
         self.assertIs(out["resources"], True)
         for key in TEMPLATE_EXCLUDED_FIELDS:
-            self.assertEqual(out[key], DEFAULTS[key])
+            self.assertEqual(out[key], DEFAULTS[key])  # incl. dedupe/dedupe_subject
 
     def test_keeps_full_schema_shape(self):
         # Every key is still present (at its default), like coerce.

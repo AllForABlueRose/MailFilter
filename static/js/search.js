@@ -14,6 +14,7 @@ const SETTINGS_FIELDS = {
     exclude_recipient: 'excludeRecipientFilter',
     attachment_blacklist: 'attachmentBlacklist',
     links_blacklist: 'linksBlacklist',
+    dedupe_subject: 'dedupeSubjectInput',
 };
 
 function syncResourcesButton(){
@@ -110,7 +111,7 @@ function syncResolveCustomerNameButton(){
     const btn = document.getElementById('resolveCustomerNameToggle');
     btn.classList.toggle('active', resolveCustomerName);
     btn.setAttribute('aria-pressed', String(resolveCustomerName));
-    btn.textContent = `🧩 Resolve Customer Name: ${resolveCustomerName ? 'On' : 'Off'}`;
+    btn.textContent = `🧩 Brute Force Resolve: ${resolveCustomerName ? 'On' : 'Off'}`;
 }
 
 // Also a workspace/download preference — persist only, no list reload.
@@ -120,19 +121,42 @@ function toggleResolveCustomerName(){
     saveSettings();
 }
 
+function syncDedupeButton(){
+    const btn = document.getElementById('dedupeToggle');
+    btn.classList.toggle('active', dedupe);
+    btn.setAttribute('aria-pressed', String(dedupe));
+    btn.textContent = `🧬 Deduplicate Mail: ${dedupe ? 'On' : 'Off'}`;
+}
+
+// A view transform on the list (hides notifications / grafts links), so reload.
+function toggleDedupe(){
+    dedupe = !dedupe;
+    syncDedupeButton();
+    saveSettings();
+    highlightActiveTemplate();
+    loadMail();
+}
+
+// The notification subject changed — persist and reload (it changes what's hidden).
+function onDedupeSubjectChange(){
+    saveSettings();
+    loadMail();
+}
+
 // `resources`, `passwords`, `normalize_width`, `attachment_search`, `link_search`,
 // `append_customer_name` and `resolve_customer_name` are booleans handled via
 // toggle buttons; the rest are text fields mapped by SETTINGS_FIELDS.
 const SETTINGS_BOOLS = ['resources', 'passwords', 'normalize_width',
                         'attachment_search', 'link_search', 'append_customer_name',
-                        'resolve_customer_name'];
+                        'resolve_customer_name', 'dedupe'];
 
 function currentSettings(){
     const settings = {resources: resourcesOnly, passwords: passwordsOnly,
                       normalize_width: normalizeWidth,
                       attachment_search: attachmentSearch, link_search: linkSearch,
                       append_customer_name: appendCustomerName,
-                      resolve_customer_name: resolveCustomerName};
+                      resolve_customer_name: resolveCustomerName,
+                      dedupe: dedupe};
     for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
         settings[key] = document.getElementById(id).value;
     }
@@ -178,6 +202,8 @@ function applySettings(settings){
     syncAppendCustomerNameButton();
     resolveCustomerName = !!settings.resolve_customer_name;
     syncResolveCustomerNameButton();
+    dedupe = !!settings.dedupe;
+    syncDedupeButton();
     // Reveal an exclude field if it carries a value.
     Object.keys(EXCLUDE_FIELDS).forEach(which => {
         setExcludeVisible(which, !!document.getElementById(EXCLUDE_FIELDS[which].field).value);
@@ -257,6 +283,7 @@ async function loadMail(){
     data.mails.forEach(mail => {
         mailById[mail.id] = mail;
         const card = createCard(mail);
+        card.dataset.mailId = mail.id;   // lets markWorkspaceCards() find it
         // Draggable into the workspace tray (a distinct type from person drags).
         card.draggable = true;
         card.addEventListener('dragstart', e => {
@@ -272,4 +299,5 @@ async function loadMail(){
         });
         container.appendChild(card);
     });
+    markWorkspaceCards();   // grey any list item already in the workspace
 }

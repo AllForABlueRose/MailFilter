@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Mail Analyzer 2.0</title>
+<title>Mail Analyzer 3.0</title>
 <meta charset="utf-8">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -23,7 +23,7 @@
 </header>
 <div id="view-mailfilter" class="container view" data-view="mailfilter">
   <div class="sidebar">
-    <h2>Mail Analyzer 2.0</h2>
+    <h2>Mail Analyzer 3.0</h2>
 
     <div class="template-bar">
       <select id="templateSelect" onchange="switchTemplate()"
@@ -160,13 +160,25 @@
         </div>
 
         <div class="exp-feature" data-feature="resolve_customer_name" hidden>
-          <div class="exp-feature-name">🧩 Resolve Customer Name To Downloads</div>
+          <div class="exp-feature-name">🧩 Brute Force Resolve Customer Name</div>
           <button type="button" id="resolveCustomerNameToggle" class="toggle-btn"
                   aria-pressed="false" onclick="toggleResolveCustomerName()"
-                  title="When on, 'Download every attachment' appends a Suspected Customers List name found in the mail content (skipped when the sender already resolves to an organization)">
-            🧩 Resolve Customer Name: Off
+                  title="When on, a mail whose content contains a Suspected Customers List keyword resolves to that keyword's organization; the org name is appended to downloaded files (overriding Append Customer Name) and embedded in the file. Also fills the report's customer-organization column.">
+            🧩 Brute Force Resolve: Off
           </button>
           <button type="button" class="exclude-toggle" onclick="openSuspectedCustomers()">Suspected Customers List</button>
+        </div>
+
+        <div class="exp-feature" data-feature="dedupe" hidden>
+          <div class="exp-feature-name">🧬 Brute Force Mail Deduplication</div>
+          <button type="button" id="dedupeToggle" class="toggle-btn"
+                  aria-pressed="false" onclick="toggleDedupe()"
+                  title="When on, a mail whose subject exactly matches the one below is treated as a Zendesk notification: its link is grafted onto the original 'twin' mail within ±1 hour (matched by subject+body), and the notification itself is hidden.">
+            🧬 Deduplicate Mail: Off
+          </button>
+          <input type="text" id="dedupeSubjectInput" class="dedupe-subject"
+                 placeholder="Notification subject to detect (exact match)"
+                 onchange="onDedupeSubjectChange()">
         </div>
       </div>
     </div>
@@ -214,6 +226,8 @@
               <button id="trayReportBtn" class="flip-btn" onclick="exportTrayReport()"
                       title="Export a CSV report of the items here" disabled>📄</button>
               <button class="flip-btn" onclick="clearTray()" title="Clear workspace">🧹</button>
+              <button id="trayCleanupBtn" class="flip-btn" onclick="cleanupLocalWorkspace()"
+                      title="Cleanup Local Workspace: delete files downloaded through the app from today’s folder">🗑️</button>
             </div>
             <div id="trayStatus" class="tray-status"></div>
           </div>
@@ -599,8 +613,13 @@
         </label>
         <label class="exp-check">
           <input type="checkbox" data-feature="resolve_customer_name">
-          <span class="exp-check-name">🧩 Resolve Customer Name To Downloads</span>
-          <span class="exp-check-desc">When downloading every attachment, append a name from your Suspected Customers List if it appears in the mail content. Skipped for a mail already matched by Append Customer Name.</span>
+          <span class="exp-check-name">🧩 Brute Force Resolve Customer Name</span>
+          <span class="exp-check-desc">Map keywords to organizations in the Suspected Customers List; a mail whose content contains a keyword resolves to that organization. The org name is appended to and embedded in downloaded files (overriding Append Customer Name) and fills the exported report's customer-organization column.</span>
+        </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="dedupe">
+          <span class="exp-check-name">🧬 Brute Force Mail Deduplication</span>
+          <span class="exp-check-desc">Detect Zendesk notification mails by an exact subject; graft their ticket link onto the original "twin" mail within ±1 hour (matched by subject+body appearing in the notification), and hide the redundant notification. A view-only transform — the cache is never changed.</span>
         </label>
       </div>
     </div>
@@ -618,13 +637,14 @@
     </div>
     <div class="modal-body">
       <p class="exp-help">
-        One customer name per line. When <b>Download every attachment</b> runs and a
-        name appears in a mail's content (subject or body), it's appended to that
-        mail's files — unless the sender already resolved to an organization via
-        <b>Append Customer Name To Downloads</b>.
+        Map a <b>keyword</b> to a <b>customer organization</b>. When a mail's content
+        (subject or body) contains the keyword, the mail resolves to that
+        organization — used for the download file name/metadata and the exported
+        report's customer-organization column. The first matching keyword (top to
+        bottom) wins.
       </p>
-      <textarea id="suspectedCustomersText" class="suspected-customers-text" rows="12"
-                placeholder="Acme Corp&#10;Globex&#10;Initech"></textarea>
+      <div id="suspectedCustomersRows" class="suspected-rows"></div>
+      <button type="button" class="exclude-toggle" onclick="addSuspectedCustomerRow()">+ Add keyword</button>
     </div>
     <div class="modal-actions auto-modal-actions">
       <button type="button" class="auto-save-btn" onclick="saveSuspectedCustomers()">Save</button>

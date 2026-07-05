@@ -72,12 +72,22 @@ class FromArgsTests(unittest.TestCase):
             self.assertFalse(MailQuery.from_args({"attachment_search": val}).attachment_search)
             self.assertFalse(MailQuery.from_args({"link_search": val}).link_search)
 
+    def test_dedupe_flag_and_subject(self):
+        for val in ("1", "true", "on"):
+            self.assertTrue(MailQuery.from_args({"dedupe": val}).dedupe)
+        for val in ("", "0", "off"):
+            self.assertFalse(MailQuery.from_args({"dedupe": val}).dedupe)
+        q = MailQuery.from_args({"dedupe": "1", "dedupe_subject": "New ticket created"})
+        self.assertEqual(q.dedupe_subject, "New ticket created")
+        self.assertEqual(MailQuery.from_args({}).dedupe_subject, "")
+
     def test_defaults_when_absent(self):
         q = MailQuery.from_args({})
         self.assertIsNone(q.main)
         self.assertIsNone(q.start)
         self.assertFalse(q.resources_only)
         self.assertFalse(q.passwords_only)
+        self.assertFalse(q.dedupe)
         self.assertFalse(q.normalize_width)
         self.assertFalse(q.attachment_search)
         self.assertFalse(q.link_search)
