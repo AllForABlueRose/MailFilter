@@ -36,13 +36,12 @@ DEFAULTS = {
     # Experimental: extend the keyword match to attachment names / link URLs.
     "attachment_search": False,
     "link_search": False,
-    # Experimental (workspace, not search): append the sender's org name to
+    # Experimental (workspace, not search): append the resolved customer-org name to
     # batch-downloaded files. Persisted as a last-used preference; a saved template
-    # doesn't carry it (it's in TEMPLATE_EXCLUDED_FIELDS).
+    # doesn't carry it (it's in TEMPLATE_EXCLUDED_FIELDS). (The Brute Force keyword
+    # tier of the org resolver has no per-search setting — it follows its
+    # experimental feature's enablement, so it isn't stored here.)
     "append_customer_name": False,
-    # Experimental (workspace, not search): append a Suspected Customers List name
-    # found in a mail's content to batch-downloaded files. Also template-excluded.
-    "resolve_customer_name": False,
     # Experimental (Brute Force Mail Deduplication): the on/off toggle and the
     # notification subject to detect. View-only transform; both template-excluded.
     "dedupe": False,
@@ -58,7 +57,7 @@ MAX_LEN = 500
 # preset. `coerce_template` forces these back to their defaults on save, and the UI
 # re-applies the live values after switching to a template (see templates.js).
 TEMPLATE_EXCLUDED_FIELDS = ("start", "end", "normalize_width", "append_customer_name",
-                            "resolve_customer_name", "dedupe", "dedupe_subject")
+                            "dedupe", "dedupe_subject")
 
 
 def coerce(raw, base=None):

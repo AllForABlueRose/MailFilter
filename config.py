@@ -45,6 +45,11 @@ WORKSPACE_MANIFEST_NAME = ".mailanalyzer_workspace.json"
 # moving the decompressed file(s) up into the dated workspace folder and deleting
 # the archive + this folder (see mailfilter/unlock_ops.py).
 UNLOCK_EXTRACT_DIRNAME = "._unlock_extract"
+# Legacy encoding for zip entry names that lack the UTF-8 flag (general-purpose bit
+# 11 / 0x800). Windows/Japanese tooling stores such names as Shift-JIS bytes, which
+# Python's zipfile mis-decodes as CP437; the Unlock Station re-decodes with this
+# (cp932 is Microsoft's Shift-JIS superset) so 文字化け names come out correct.
+UNLOCK_ZIP_LEGACY_ENCODING = "cp932"
 # Workshop → Calendar. Pinned-file records: dragging a today's-workspace file onto
 # a calendar day copies its bytes into the "limbo" holding folder (a sibling of the
 # dated folders, WORKSPACE_DIR/<LIMBO>/) and records a pin. On server startup any

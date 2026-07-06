@@ -142,15 +142,26 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                      calendar_store):
     bp = Blueprint("mailfilter", __name__)
 
-    def view_model(mail, query, resolve_labels=None):
+    def view_model(mail, query, resolve_org=None):
         view = to_view_model(mail, query.main, query.optional,
                              query.attachment_blacklist, query.links_blacklist)
         view["tags"] = tag_store.tags_for(mail["id"])
-        # The sender's resolved customer-organization label(s), when a resolver is
-        # supplied (built once per request). Derived from the customer store, which
-        # the presenter must not import, so it's attached here like `tags`.
-        view["org_labels"] = resolve_labels(mail.get("sender_email", "")) if resolve_labels else []
+        # The mail's single resolved customer organization, when a resolver is
+        # supplied (built once per request). One shared source (Brute Force > rep >
+        # sender member) drives this pill, the download name, and the CSV column; the
+        # pill uses the display name. Attached here like `tags` — the presenter must
+        # not import the customer store. A blank list when unresolved.
+        org = resolve_org(mail) if resolve_org else None
+        view["org_labels"] = [customers.org_label(org)] if org else []
         return view
+
+    def _mail_org_resolver():
+        """The per-request mail->org resolver: the Brute Force keyword tier is active
+        only when its experimental feature is enabled (the pill agrees with the
+        download/CSV single source)."""
+        mappings = (customer_match_store.mappings()
+                    if experimental_store.snapshot().get("resolve_customer_name") else None)
+        return customers.mail_org_resolver(customer_store.snapshot(), mappings)
 
     def _resolve_org_id(email):
         return resolve_org_id(customer_store, email)
@@ -288,12 +299,17 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         hidden, twin_links = (set(), {})
         if query.dedupe and query.dedupe_subject.strip():
             hidden, twin_links = dedup.dedupe(snap, query.dedupe_subject)
-        resolve_labels = customers.label_resolver(customer_store.snapshot())
+            # Tag each processed twin (record-once, so the 🧬 label ages from first
+            # processing rather than being re-stamped on every poll). Done before the
+            # view-model loop so tags_for reflects it on this same response.
+            for twin_id in twin_links:
+                tag_store.record_once(twin_id, "deduped")
+        resolve_org = _mail_org_resolver()
         out = []
         for m in mails:
             if m["id"] in hidden:
                 continue
-            view = view_model(m, query, resolve_labels)
+            view = view_model(m, query, resolve_org)
             urls = twin_links.get(m["id"])
             if urls:
                 view["links"] = view["links"] + extra_link_views(
@@ -308,8 +324,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         # malformed expression simply highlights nothing.
         query = MailQuery.from_args(request.args)
         mails = store.thread_for(request.args.get("id", ""))
-        resolve_labels = customers.label_resolver(customer_store.snapshot())
-        return jsonify({"mails": [view_model(m, query, resolve_labels) for m in mails]})
+        resolve_org = _mail_org_resolver()
+        return jsonify({"mails": [view_model(m, query, resolve_org) for m in mails]})
 
     @bp.get("/attachments/<mail_id>/<int:index>")
     def download_attachment(mail_id, index):
@@ -339,25 +355,31 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
         Body: ``{"items": [{"id": <mail id>, "index": <int>}, ...],
         "append_customer_name": <bool>}``. Files go into
-        ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a time.
-        With ``append_customer_name`` on (the experimental toggle), a file whose
-        sender resolves to an organization gets ``_<org name>`` appended to its
-        stem. Returns the folder and the saved filenames; per-item failures are
-        collected in ``errors`` rather than aborting the whole batch.
+        ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` (created if absent), one at a time. The
+        mail's org comes from the shared single source; its **Brute Force keyword
+        tier is governed by that experimental feature's enablement** (same as the
+        pill and CSV — no per-request toggle), so the download can't disagree with
+        them. ``append_customer_name`` is a per-request action gated by both the
+        request AND its experimental feature: when on it appends ``_<org name>`` to a
+        saved file's stem. Returns the folder and the saved filenames; per-item
+        failures are collected in ``errors`` rather than aborting the batch.
         """
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
 
-        append = data.get("append_customer_name") in (True, "1", "true", "on")
-        resolve = data.get("resolve_customer_name") in (True, "1", "true", "on")
-        # Orgs are needed for the sender resolver (append) and the keyword->org
-        # lookup (resolve/Brute Force), so fetch them when either toggle is on.
-        orgs = customer_store.snapshot() if (append or resolve) else None
-        customer_mappings = customer_match_store.mappings() if resolve else None
+        flags = experimental_store.snapshot()
+        append = (bool(flags.get("append_customer_name"))
+                  and data.get("append_customer_name") in (True, "1", "true", "on"))
+        # Always resolve the mail's org for the manifest (the shared single source);
+        # the Brute Force keyword tier follows its experimental enablement, `append`
+        # only controls the filename suffix.
+        orgs = customer_store.snapshot()
+        customer_mappings = (customer_match_store.mappings()
+                             if flags.get("resolve_customer_name") else None)
         folder, saved, errors = workspace_ops.save_attachments(
             store, data.get("items") or [], append_org_name=append, orgs=orgs,
-            resolve_customer=resolve, customer_mappings=customer_mappings)
+            resolve_customer=bool(customer_mappings), customer_mappings=customer_mappings)
         for mid in {s["id"] for s in saved}:
             tag_store.record(mid, "downloaded")
         return jsonify({"folder": folder, "saved": saved, "errors": errors})
@@ -381,17 +403,21 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
         Body: ``{"ids": [<mail id>, ...]}`` in the order to write. Columns, left
         to right: ``Datetime, subject, recipient, sender, customer organization``.
-        The last column is resolved from the "Brute Force Resolve Customer Name"
-        keyword->org mappings. The filename embeds the creation date. Unknown ids
-        are skipped. Returns the folder, the file name, and the row count.
+        The last column is the mail's org from the shared single source (Brute Force
+        keyword > representative > sender member); the Brute Force keyword tier is
+        included only when its experimental feature is enabled (scoped server-side).
+        The filename embeds the creation date. Unknown ids are skipped. Returns the
+        folder, the file name, and the row count.
         """
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
 
+        mappings = (customer_match_store.mappings()
+                    if experimental_store.snapshot().get("resolve_customer_name") else None)
         folder, name, count = workspace_ops.write_report(
             store, data.get("ids") or [],
-            mappings=customer_match_store.mappings(), orgs=customer_store.snapshot())
+            mappings=mappings, orgs=customer_store.snapshot())
         return jsonify({"folder": folder, "name": name, "count": count})
 
     @bp.post("/api/workspace/cleanup")
@@ -505,9 +531,17 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         """Auto-assign keys from each org's recorded pattern, then unlock.
 
         For every workspace file whose org has a recorded pattern for that file
-        kind, pick the concrete key (``managed`` = the org's first managed key;
-        ``recent_temporary`` = its newest captured temporary key) and run the same
-        engine as a manual unlock. Requires the vault unlocked (**423**).
+        kind, pick the concrete key kind (``managed`` = a managed key;
+        ``recent_temporary`` = a temporary key) and run the same engine as a manual
+        unlock. Requires the vault unlocked (**423**).
+
+        When an org has **more than one file of a kind**, keys are paired
+        newest->oldest instead of every file sharing one key: the files are sorted by
+        their originating datetime (newest first) and matched positionally against
+        that kind's keys (also newest first, per ``vault_store._ordered``). If there
+        are fewer keys than files, the oldest leftover files are left unassigned
+        (unkeyed zips still extract; encrypted excels without a key are skipped). A
+        single-file org keeps the standard behavior (its newest key of the kind).
         """
         if not vault_store.is_unlocked():
             return jsonify({"error": "vault locked"}), 423
@@ -519,21 +553,37 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         entry_idx = {e["id"]: e for items in by_org.values() for e in items}
         orgs = {o["id"]: o for o in customer_store.snapshot()}
 
-        def resolve_entry_id(f):
+        # Group files by (org, file kind) among orgs with a recorded pattern for that
+        # kind, then pair keys to files newest->oldest within each group.
+        groups = {}
+        for f in listing["files"]:
             org = orgs.get(f["org_id"])
             if not org:
-                return None
+                continue
             pattern = next((k for k in org.get("key_assignments", [])
                             if k.get("file_kind") == f["kind"]), None)
             if not pattern:
-                return None
-            want = "managed" if pattern["selector"] == "managed" else "temporary"
-            # entries_by_org orders managed-first then temporary newest-first, so the
-            # first match of the wanted kind is exactly the recorded selector.
-            match = next((e for e in by_org.get(f["org_id"], []) if e.get("kind") == want), None)
-            return match["id"] if match else None
+                continue
+            groups.setdefault((f["org_id"], f["kind"]), (pattern["selector"], []))[1].append(f)
 
-        assignments = _build_unlock_assignments(listing["files"], resolve_entry_id, entry_idx)
+        assigned = {}  # filename -> entry_id
+        for (org_id, _kind), (selector, files) in groups.items():
+            want = "managed" if selector == "managed" else "temporary"
+            keys = [e for e in by_org.get(org_id, []) if e.get("kind") == want]
+            if not keys:
+                continue
+            # Newest datetime first, so file[i] pairs with the i-th newest key.
+            ordered = sorted(files, key=lambda f: f.get("received", ""), reverse=True)
+            if len(ordered) <= 1:
+                assigned[ordered[0]["name"]] = keys[0]["id"]
+                continue
+            for i, f in enumerate(ordered):
+                if i < len(keys):
+                    assigned[f["name"]] = keys[i]["id"]
+                # else: leftover oldest file left unassigned
+
+        assignments = _build_unlock_assignments(
+            listing["files"], lambda f: assigned.get(f["name"]), entry_idx)
         return jsonify(unlock_ops.unlock_files(assignments))
 
     # ----- Workshop → Calendar (file pins) -----

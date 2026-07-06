@@ -9,7 +9,8 @@ from pathlib import Path
 import config
 from mailfilter import workspace_manifest
 
-META = {"org_id": "o1", "org_name": "Acme Corp", "mail_id": "m1"}
+META = {"org_id": "o1", "org_name": "Acme Corp", "mail_id": "m1",
+        "received": "2026-01-02 09:30:00"}
 
 
 class WorkspaceManifestTests(unittest.TestCase):
@@ -28,7 +29,13 @@ class WorkspaceManifestTests(unittest.TestCase):
         workspace_manifest.record(self.folder, "x.zip",
                                   {"org_id": "o", "junk": "drop", "org_name": None})
         self.assertEqual(workspace_manifest.lookup(self.folder, "x.zip"),
-                         {"org_id": "o", "org_name": "", "mail_id": ""})
+                         {"org_id": "o", "org_name": "", "mail_id": "", "received": ""})
+
+    def test_received_roundtrips(self):
+        workspace_manifest.record(self.folder, "r.zip",
+                                  {"mail_id": "m1", "received": "2026-03-04 12:00:00"})
+        got = workspace_manifest.lookup(self.folder, "r.zip")
+        self.assertEqual(got["received"], "2026-03-04 12:00:00")
 
     def test_is_app_file_and_external_files(self):
         workspace_manifest.record(self.folder, "app.zip", META)

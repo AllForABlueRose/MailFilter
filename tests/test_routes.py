@@ -32,14 +32,18 @@ class RouteTests(unittest.TestCase):
         self._orig_templates = config.TEMPLATES_DIR
         self._orig_automations = config.AUTOMATIONS_FILE
         self._orig_customers = config.CUSTOMERS_FILE
+        self._orig_customer_match = config.CUSTOMER_MATCH_FILE
+        self._orig_experimental = config.EXPERIMENTAL_FILE
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
         config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
         config.TAGS_FILE = Path(self._tmpdir) / "tags.json"
         config.TEMPLATES_DIR = Path(self._tmpdir) / "search_templates"
         # Isolate the list-backed stores too, so the suite never reads or writes
-        # the real automations/customers caches in the project root.
+        # the real automations/customers/customer-match/experimental caches.
         config.AUTOMATIONS_FILE = Path(self._tmpdir) / "automations.json"
         config.CUSTOMERS_FILE = Path(self._tmpdir) / "customers.json"
+        config.CUSTOMER_MATCH_FILE = Path(self._tmpdir) / "customer_match.json"
+        config.EXPERIMENTAL_FILE = Path(self._tmpdir) / "experimental.json"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -55,6 +59,8 @@ class RouteTests(unittest.TestCase):
         config.TEMPLATES_DIR = self._orig_templates
         config.AUTOMATIONS_FILE = self._orig_automations
         config.CUSTOMERS_FILE = self._orig_customers
+        config.CUSTOMER_MATCH_FILE = self._orig_customer_match
+        config.EXPERIMENTAL_FILE = self._orig_experimental
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -107,6 +113,29 @@ class RouteTests(unittest.TestCase):
         cs.set_domain(org["id"], "example.com", "member")
         vm = self.client.get("/api/mail").get_json()["mails"][0]
         self.assertEqual(vm["org_labels"], [{"name": "Ex", "color": "#0a0b0c"}])
+
+    def test_api_mail_org_label_is_single_winner_rep_beats_member(self):
+        # Seeded sender is example.com: member of Base, represented by Acme -> one pill.
+        cs = self.app.extensions["customer_store"]
+        base = cs.create({"name": "Base Inc"})
+        cs.set_domain(base["id"], "example.com", "member")
+        acme = cs.create({"name": "Acme Corp", "display_name": "Acme", "color": "#abcdef"})
+        cs.set_domain(acme["id"], "example.com", "representative")
+        vm = self.client.get("/api/mail").get_json()["mails"][0]
+        self.assertEqual(vm["org_labels"], [{"name": "Acme", "color": "#abcdef"}])
+
+    def test_api_mail_pill_reflects_brute_force_only_when_enabled(self):
+        cs = self.app.extensions["customer_store"]
+        glo = cs.create({"name": "Globex Inc", "display_name": "Globex", "color": "#00ff00"})
+        self.app.extensions["customer_match_store"].update(
+            [{"keyword": "server error", "org_id": glo["id"]}])  # matches ID1's subject
+        # Feature disabled -> keyword tier off -> no pill (sender in no org).
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
+        self.assertEqual(vm["org_labels"], [])
+        # Enable the experimental feature -> the keyword org now drives the pill.
+        self.app.extensions["experimental_store"].update({"resolve_customer_name": True})
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
+        self.assertEqual(vm["org_labels"], [{"name": "Globex", "color": "#00ff00"}])
 
     def test_attachment_blacklist_omits_in_api(self):
         self.store.add_mails([
@@ -207,6 +236,55 @@ class RouteTests(unittest.TestCase):
         finally:
             config.WORKSPACE_DIR = orig
 
+    def test_report_brute_force_gated_by_experimental_flag(self):
+        import csv
+        from datetime import datetime
+        self.store.add_mails([make_mail(id="RB", subject="server error alpha",
+                                        sender_email="x@nobody.com")])
+        glo = self.app.extensions["customer_store"].create({"name": "Globex Inc"})
+        self.app.extensions["customer_match_store"].update(
+            [{"keyword": "server error", "org_id": glo["id"]}])
+        out = Path(self._tmpdir) / "wreport2"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+
+        def org_cell():
+            self.client.post("/api/report", json={"ids": ["RB"]})
+            folder = out / datetime.now().strftime("%Y-%m-%d")
+            csv_file = next(p for p in folder.iterdir() if p.suffix == ".csv")
+            with csv_file.open(encoding="utf-8-sig", newline="") as f:
+                return list(csv.reader(f))[1][4]
+        try:
+            self.assertEqual(org_cell(), "")   # feature disabled -> keyword tier off
+            self.app.extensions["experimental_store"].update({"resolve_customer_name": True})
+            self.assertEqual(org_cell(), "Globex Inc")  # enabled -> keyword org (real name)
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_download_append_gated_by_experimental_flag(self):
+        self.store.add_mails([make_mail(id="DA", sender_email="bob@example.com",
+                                        attachments=[{"filename": "a.pdf"}])])
+        cs = self.app.extensions["customer_store"]
+        org = cs.create({"name": "Example Inc"})
+        cs.set_domain(org["id"], "example.com", "member")
+        out = Path(self._tmpdir) / "wdl"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+
+        def saved_name():
+            with mock.patch("mailfilter.outlook.fetch_attachment",
+                            side_effect=lambda mid, idx: ("a.pdf", b"bytes")):
+                r = self.client.post("/api/download", json={
+                    "items": [{"id": "DA", "index": 0}], "append_customer_name": True})
+            return r.get_json()["saved"][0]["name"]
+        try:
+            # Append feature disabled -> the request's append flag is ignored.
+            self.assertEqual(saved_name(), "a.pdf")
+            self.app.extensions["experimental_store"].update({"append_customer_name": True})
+            self.assertEqual(saved_name(), "a_Example Inc.pdf")
+        finally:
+            config.WORKSPACE_DIR = orig
+
     def test_report_rejects_non_object(self):
         self.assertEqual(self.client.post("/api/report", json=["x"]).status_code, 400)
 
@@ -253,6 +331,27 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("NOTE", by_id)
         self.assertIn("https://zendesk.example/tickets/42",
                       [l["url"] for l in by_id["ORIG"]["links"]])
+        # The processed twin carries the 🧬 "deduped" tag on the same response.
+        self.assertEqual(by_id["ORIG"]["tags"].get("deduped"), "recent")
+
+    def test_mail_dedupe_tag_persists_and_records_once(self):
+        self.store.add_mails([
+            make_mail(id="O2", subject="Server error report", body="Disk full on node 3",
+                      received="2026-06-10 09:30:00"),
+            make_mail(id="N2", subject="New ticket created", received="2026-06-10 09:40:00",
+                      body="Ticket opened.\nSubject: Server error report\n"
+                           "Body: Disk full on node 3"),
+        ])
+        url = "/api/mail?dedupe=1&dedupe_subject=New ticket created"
+        self.client.get(url)
+        # Recorded server-side in the tag store, and shown even without the dedupe
+        # toggle on a later request (a persistent tag, like downloaded/links).
+        self.assertIn("deduped", self.app.extensions["tag_store"].tags_for("O2"))
+        vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "O2")
+        self.assertEqual(vm["tags"].get("deduped"), "recent")
+        # A second dedupe pass is idempotent (record-once), still "recent".
+        on = {m["id"]: m for m in self.client.get(url).get_json()["mails"]}
+        self.assertEqual(on["O2"]["tags"].get("deduped"), "recent")
 
     def test_download_reports_unknown_attachment(self):
         downloads = Path(self._tmpdir) / "downloads2"

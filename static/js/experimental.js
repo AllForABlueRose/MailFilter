@@ -24,9 +24,8 @@ const EXPERIMENTAL_FEATURES = [
     {id: 'append_customer_name',
      isOn: () => appendCustomerName,
      turnOff: () => { appendCustomerName = false; syncAppendCustomerNameButton(); }},
-    {id: 'resolve_customer_name',
-     isOn: () => resolveCustomerName,
-     turnOff: () => { resolveCustomerName = false; syncResolveCustomerNameButton(); }},
+    // `resolve_customer_name` has no per-search operational state — enabling the
+    // feature IS its activation — so it needs no isOn/turnOff entry here.
     {id: 'dedupe',
      isOn: () => dedupe,
      turnOff: () => { dedupe = false; syncDedupeButton(); }},
@@ -85,6 +84,9 @@ async function updateExperimental(){
     }catch(e){
         return;  // leave the panel open so the user can retry
     }
+    // Brute Force Resolve has no operational toggle — its enablement alone drives
+    // the mail-list org pill — so note whether it flipped to reload the list.
+    const resolveChanged = (!!experimentalEnabled['resolve_customer_name']) !== (!!saved['resolve_customer_name']);
     experimentalEnabled = saved;
     let operationalChanged = false;
     EXPERIMENTAL_FEATURES.forEach(f => {
@@ -98,6 +100,8 @@ async function updateExperimental(){
     if(operationalChanged){
         saveSettings();
         highlightActiveTemplate();
+        loadMail();
+    }else if(resolveChanged){
         loadMail();
     }
 }

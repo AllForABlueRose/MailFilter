@@ -11,6 +11,7 @@ Flask or duplication. Pure of Flask; depends only on store/outlook/util/config.
 import csv
 import io
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -41,33 +42,34 @@ def save_attachments(store, items, append_org_name=False, orgs=None,
     per-item failures are collected in ``errors`` rather than aborting the batch.
     The caller owns any tagging (the routes tag "downloaded"; so does the engine).
 
-    Two independent, experimental ways to resolve a mail's **organization**; both
-    are off for the automation engine:
+    A mail's organization comes from the **single shared resolver**
+    (:func:`mailfilter.customers.mail_org_resolver`) — the same source behind the
+    mail-list pill and the CSV report — with hierarchy Brute Force keyword >
+    representative > sender member. Its brute-force tier is active only when
+    ``resolve_customer`` is on (``customer_mappings`` = the Suspected Customers List);
+    the sender tiers need ``orgs``. Both are off for the automation engine (no
+    ``orgs``/``mappings`` → no org).
 
-    * ``append_org_name`` — "Append Customer Name To Downloads": the file's mail's
-      **sender** resolves to an organization in ``orgs`` (representative-of
-      preferred over base membership).
-    * ``resolve_customer`` — "Brute Force Resolve Customer Name": one of the
-      ``customer_mappings`` keywords (``[{"keyword", "org_id"}, ...]``) appears in
-      the mail's content, mapping it to that organization (looked up in ``orgs``).
-
-    Brute Force Resolve takes **priority**: when both resolve a mail, its keyword
-    org overrides the sender org. The resolved org's name is appended to the file
-    stem (``_<org name>``) and recorded — for **every** saved file, org fields
-    blank when unresolved — in the folder's sidecar manifest
+    The resolved org (real ``name``) is recorded — for **every** saved file, org
+    fields blank when unresolved — in the folder's sidecar manifest
     (:mod:`mailfilter.workspace_manifest`), so org identity travels with the file
     (and survives later encryption) without touching the file's own bytes. A
     manifest entry's presence is also the "downloaded by this app" signal Cleanup
-    keys off. A mail that resolves to no org still gets a (blank-org) manifest
-    entry, but no filename suffix.
+    keys off. ``append_org_name`` ("Append Customer Name To Downloads") gates only
+    the **filename suffix** (``_<org name>``); a mail that resolves to no org (or with
+    append off) still gets a manifest entry, just no suffix.
+
+    Each saved file is also **stamped with its originating mail's received
+    datetime** — both the file's own mtime (via :func:`os.utime`) and the manifest's
+    ``received`` field — so the datetime travels with the file and the Unlock
+    Station can later inherit it and pair keys newest->oldest.
     """
     folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
     folder.mkdir(parents=True, exist_ok=True)
 
-    wanted = {(item or {}).get("id") for item in items}
-    bruteforce = (_brute_force_org_matches(store, wanted, customer_mappings, orgs)
-                  if resolve_customer else {})
-    sender = _sender_org_matches(store, wanted, orgs) if append_org_name else {}
+    resolve_org = customers.mail_org_resolver(
+        orgs or [], customer_mappings if resolve_customer else None)
+    by_id = {m["id"]: m for m in store.snapshot()}
 
     saved, errors = [], []
     for item in items:
@@ -86,77 +88,32 @@ def save_attachments(store, items, append_org_name=False, orgs=None,
             errors.append(f"{mail_id}#{index}: {e}")
             continue
         name = filename or att["filename"]
-        org = bruteforce.get(mail_id) or sender.get(mail_id)
-        if org and org["org_name"]:
-            name = append_stem(name, org["org_name"])
+        mail = by_id.get(mail_id)
+        org = resolve_org(mail) if mail is not None else None
+        if append_org_name and org and org.get("name"):
+            name = append_stem(name, org["name"])
         target = unique_path(folder, name, index)
         target.write_bytes(blob)
+        # Stamp the file with its originating mail's received datetime (the derived
+        # _received_dt is naive-local, so .timestamp() gives the right local epoch).
+        received = (mail or {}).get("received", "")
+        mail_dt = (mail or {}).get("_received_dt")
+        if mail_dt is not None:
+            ts = mail_dt.timestamp()
+            os.utime(target, (ts, ts))
         # Record *every* download in the folder manifest (org fields blank when
         # unresolved), so "Cleanup Local Workspace" and the Unlock Station can tell
-        # app files from incidental ones and read each file's org without decoding
-        # its bytes (which fails once the file is encrypted).
+        # app files from incidental ones and read each file's org (real name) and
+        # originating datetime without decoding its bytes (which fails once encrypted).
         workspace_manifest.record(str(folder), target.name, {
-            "org_id": org["org_id"] if org else "",
-            "org_name": org["org_name"] if org else "",
-            "mail_id": mail_id})
+            "org_id": org.get("id") if org else "",
+            "org_name": org.get("name", "") if org else "",
+            "mail_id": mail_id,
+            "received": received})
         saved.append({"id": mail_id, "index": index, "name": target.name})
 
     log.info("Saved %d attachment(s) to %s (%d error(s))", len(saved), folder, len(errors))
     return str(folder), saved, errors
-
-
-def _sender_org_matches(store, wanted, orgs):
-    """Map each wanted mail id to ``{org_id, org_name}`` for its sender's org.
-
-    Resolves the sender on both axes (``customers.resolve``) and prefers the
-    representative-of org over the base membership. Built once per batch so each
-    mail resolves a single time regardless of how many attachments it has. Mails
-    whose sender resolves to no org are absent.
-    """
-    by_id = {m["id"]: m for m in store.snapshot()}
-    out = {}
-    for mail_id in wanted:
-        mail = by_id.get(mail_id)
-        if mail is None:
-            continue
-        res = customers.resolve(mail.get("sender_email", ""), orgs or [])
-        if res["rep_org_id"]:
-            out[mail_id] = {"org_id": res["rep_org_id"], "org_name": res["rep_org_name"]}
-        elif res["member_org_id"]:
-            out[mail_id] = {"org_id": res["member_org_id"], "org_name": res["member_org_name"]}
-    return out
-
-
-def _brute_force_org_matches(store, wanted, mappings, orgs):
-    """Map each wanted mail id to ``{org_id, org_name}`` via the keyword->org list.
-
-    For every wanted mail, scan the mail's content (subject + body,
-    case-insensitively) for the **first** ``mappings`` keyword (in list order) that
-    appears, and resolve that mapping's ``org_id`` to a live org in ``orgs``. Mails
-    with no keyword match — or whose matched keyword maps to an org that no longer
-    exists — are absent. Shared by the download namer and the CSV report so the
-    resolution rule lives in one place.
-    """
-    cleaned = [(str(m.get("keyword") or "").strip(), str(m.get("org_id") or ""))
-               for m in (mappings or []) if str((m or {}).get("keyword") or "").strip()]
-    if not cleaned:
-        return {}
-    orgs_by_id = {o.get("id"): o for o in (orgs or [])}
-    by_id = {m["id"]: m for m in store.snapshot()}
-    matches = {}
-    for mail_id in wanted:
-        mail = by_id.get(mail_id)
-        if mail is None:
-            continue
-        content = (mail.get("subject", "") + "\n" + mail.get("body", "")).lower()
-        for keyword, org_id in cleaned:
-            if keyword.lower() in content:
-                org = orgs_by_id.get(org_id)
-                if org is not None:
-                    matches[mail_id] = {"org_id": org.get("id"),
-                                        "org_name": org.get("name", "")}
-                break
-    return matches
 
 
 def append_stem(filename, suffix):
@@ -174,25 +131,28 @@ def write_report(store, ids, mappings=None, orgs=None):
     """Write a CSV report of the given mail ids into the dated workspace folder.
 
     Columns, left to right: ``Datetime, subject, recipient, sender, customer
-    organization``. The last column is the org resolved for each mail by the
-    "Brute Force Resolve Customer Name" keyword->org ``mappings`` (looked up in
-    ``orgs``), blank when no keyword matches. Rows follow the order of ``ids``;
-    unknown ids are skipped. Returns ``(folder, name, count)``.
+    organization``. The last column is the mail's org from the **single shared
+    resolver** (:func:`mailfilter.customers.mail_org_resolver`, real ``name``) — the
+    same source as the pill and the download name — so it reflects Brute Force
+    keyword > representative > sender member. ``mappings`` enables the brute-force
+    tier (the caller passes them only when that experimental feature is on). Rows
+    follow the order of ``ids``; unknown ids are skipped. Returns
+    ``(folder, name, count)``.
     """
     by_id = {m["id"]: m for m in store.snapshot()}
-    org_by_id = _brute_force_org_matches(store, set(ids), mappings, orgs)
+    resolve_org = customers.mail_org_resolver(orgs or [], mappings)
     rows = []
     for mail_id in ids:
         mail = by_id.get(mail_id)
         if mail is None:
             continue
-        org = org_by_id.get(mail_id)
+        org = resolve_org(mail)
         rows.append([
             mail.get("received", ""),
             mail.get("subject", ""),
             people_text(mail.get("recipient_names", []), mail.get("recipient_emails", [])),
             person_text(mail.get("sender", ""), mail.get("sender_email", "")),
-            org["org_name"] if org else "",
+            org.get("name", "") if org else "",
         ])
 
     now = datetime.now()

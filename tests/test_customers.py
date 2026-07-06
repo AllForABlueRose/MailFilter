@@ -191,47 +191,98 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(d["carol@acme.com"]["last_received"], "2026-06-01 09:30:00")
 
 
-class LabelResolverTests(unittest.TestCase):
+class OrgLabelTests(unittest.TestCase):
+    """`customers.org_label` — the single-org pill (display name + colour)."""
+
+    def test_uses_display_name_and_color(self):
+        org = {"name": "Acme Corporation", "display_name": "Acme", "color": "#ff3366"}
+        self.assertEqual(customers.org_label(org), {"name": "Acme", "color": "#ff3366"})
+
+    def test_display_name_falls_back_to_real_name(self):
+        org = {"name": "Acme Corporation", "display_name": "", "color": "#111111"}
+        self.assertEqual(customers.org_label(org)["name"], "Acme Corporation")
+
+
+class MailOrgResolverTests(unittest.TestCase):
+    """The single shared mail->org resolver: Brute Force keyword > representative >
+    sender member, feeding pill + download + CSV."""
+
     def _org(self, oid, **over):
-        org = {"id": oid, "name": oid.title(), "display_name": "", "color": "#111111",
+        org = {"id": oid, "name": oid.title(), "display_name": "", "color": "#222222",
                "domains": [], "contacts": [], "created": "2026-01-01 00:00:00"}
         org.update(over)
         return org
 
-    def test_member_label_uses_display_name_and_color(self):
-        orgs = [self._org("acme", name="Acme Corporation", display_name="Acme",
-                          color="#ff3366", domains=[{"domain": "acme.com", "role": "member"}])]
-        labels = customers.label_resolver(orgs)("carol@acme.com")
-        self.assertEqual(labels, [{"name": "Acme", "color": "#ff3366"}])
+    def setUp(self):
+        # base-of sender's member org, plus a rep-of org on the same domain.
+        self.member = self._org("base", name="Base Inc",
+                                domains=[{"domain": "acme.com", "role": "member"}])
+        self.rep = self._org("acme", name="Acme Corp", display_name="Acme",
+                             domains=[{"domain": "acme.com", "role": "representative"}])
+        self.keyword_org = self._org("glo", name="Globex Inc")
+        self.orgs = [self.member, self.rep, self.keyword_org]
+        self.mappings = [{"keyword": "Globex Industries", "org_id": "glo"}]
 
-    def test_display_name_falls_back_to_real_name(self):
-        orgs = [self._org("acme", name="Acme Corporation", display_name="",
-                          domains=[{"domain": "acme.com", "role": "member"}])]
-        self.assertEqual(customers.label_resolver(orgs)("carol@acme.com")[0]["name"],
-                         "Acme Corporation")
+    def _mail(self, **over):
+        return make_mail(**over)
 
-    def test_member_then_representative_both_labelled(self):
-        orgs = [
-            self._org("x", name="Xco", domains=[{"domain": "acme.com", "role": "member"}]),
-            self._org("acme", name="Acme", contacts=[{"email": "rep@acme.com",
-                                                       "role": "representative"}]),
-        ]
-        labels = customers.label_resolver(orgs)("rep@acme.com")
-        self.assertEqual([l["name"] for l in labels], ["Xco", "Acme"])
+    def test_representative_beats_member(self):
+        # No keyword; sender on acme.com is both a member (Base) and represented (Acme).
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com", body="hi"), self.orgs)
+        self.assertEqual(org["id"], "acme")   # representative wins
 
-    def test_same_org_on_both_axes_deduped(self):
-        orgs = [self._org("acme", name="Acme",
-                          domains=[{"domain": "acme.com", "role": "member"}],
-                          contacts=[{"email": "bob@acme.com", "role": "representative"}])]
-        self.assertEqual(customers.label_resolver(orgs)("bob@acme.com"),
-                         [{"name": "Acme", "color": "#111111"}])
+    def test_member_when_no_representative(self):
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com"), [self.member])
+        self.assertEqual(org["id"], "base")
 
-    def test_unresolved_and_non_smtp_yield_no_labels(self):
-        orgs = [self._org("acme", domains=[{"domain": "acme.com", "role": "member"}])]
-        resolve = customers.label_resolver(orgs)
-        self.assertEqual(resolve("nobody@nowhere.com"), [])
-        self.assertEqual(resolve(""), [])
-        self.assertEqual(resolve("/O=EX/CN=foo"), [])
+    def test_brute_force_beats_sender(self):
+        # Keyword in body maps to Globex, overriding the sender's rep/member org.
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com", body="re: Globex Industries"),
+            self.orgs, self.mappings)
+        self.assertEqual(org["id"], "glo")
+
+    def test_brute_force_disabled_falls_back_to_sender(self):
+        # mappings=None disables the keyword tier -> sender resolution (rep) wins.
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com", body="re: Globex Industries"),
+            self.orgs, None)
+        self.assertEqual(org["id"], "acme")
+
+    def test_keyword_matches_subject_or_body_case_insensitively(self):
+        r = customers.mail_org_resolver(self.orgs, self.mappings)
+        self.assertEqual(r(self._mail(sender_email="x@nobody.com",
+                                      subject="GLOBEX INDUSTRIES ticket", body=""))["id"], "glo")
+        self.assertEqual(r(self._mail(sender_email="x@nobody.com",
+                                      subject="t", body="see globex industries"))["id"], "glo")
+
+    def test_first_keyword_in_list_order_wins(self):
+        orgs = [self._org("a", name="Acme Org"), self._org("g", name="Globex Org")]
+        mappings = [{"keyword": "Globex", "org_id": "g"}, {"keyword": "Acme", "org_id": "a"}]
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="x@nobody.com", body="Acme and Globex both appear"),
+            orgs, mappings)
+        self.assertEqual(org["id"], "g")
+
+    def test_keyword_mapped_to_missing_org_falls_through(self):
+        # Matched keyword -> deleted org: no brute-force hit, fall to sender (Acme rep).
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com", body="re: Globex Industries"),
+            self.orgs, [{"keyword": "Globex Industries", "org_id": "deleted"}])
+        self.assertEqual(org["id"], "acme")
+
+    def test_unresolved_returns_none(self):
+        self.assertIsNone(customers.resolve_mail_org(
+            self._mail(sender_email="nobody@nowhere.com", body="x"), self.orgs))
+        self.assertIsNone(customers.resolve_mail_org(
+            self._mail(sender_email="/O=EX/CN=foo", body="x"), self.orgs))
+
+    def test_display_vs_real_name(self):
+        org = customers.resolve_mail_org(self._mail(sender_email="bob@acme.com"), self.orgs)
+        self.assertEqual(customers.org_label(org), {"name": "Acme", "color": "#222222"})  # pill
+        self.assertEqual(org["name"], "Acme Corp")  # download/CSV use the real name
 
 
 if __name__ == "__main__":

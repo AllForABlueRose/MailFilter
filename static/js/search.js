@@ -107,19 +107,10 @@ function toggleAppendCustomerName(){
     saveSettings();
 }
 
-function syncResolveCustomerNameButton(){
-    const btn = document.getElementById('resolveCustomerNameToggle');
-    btn.classList.toggle('active', resolveCustomerName);
-    btn.setAttribute('aria-pressed', String(resolveCustomerName));
-    btn.textContent = `🧩 Brute Force Resolve: ${resolveCustomerName ? 'On' : 'Off'}`;
-}
-
-// Also a workspace/download preference — persist only, no list reload.
-function toggleResolveCustomerName(){
-    resolveCustomerName = !resolveCustomerName;
-    syncResolveCustomerNameButton();
-    saveSettings();
-}
+// "Brute Force Resolve Customer Name" has no per-search toggle: it is governed
+// solely by enabling/disabling its experimental feature, uniformly for the
+// mail-list pill, the download name, and the CSV report (one shared source). The
+// Suspected Customers List (its keyword->org mappings) is managed separately.
 
 function syncDedupeButton(){
     const btn = document.getElementById('dedupeToggle');
@@ -143,19 +134,18 @@ function onDedupeSubjectChange(){
     loadMail();
 }
 
-// `resources`, `passwords`, `normalize_width`, `attachment_search`, `link_search`,
-// `append_customer_name` and `resolve_customer_name` are booleans handled via
-// toggle buttons; the rest are text fields mapped by SETTINGS_FIELDS.
+// `resources`, `passwords`, `normalize_width`, `attachment_search`, `link_search`
+// and `append_customer_name` are booleans handled via toggle buttons; the rest are
+// text fields mapped by SETTINGS_FIELDS.
 const SETTINGS_BOOLS = ['resources', 'passwords', 'normalize_width',
                         'attachment_search', 'link_search', 'append_customer_name',
-                        'resolve_customer_name', 'dedupe'];
+                        'dedupe'];
 
 function currentSettings(){
     const settings = {resources: resourcesOnly, passwords: passwordsOnly,
                       normalize_width: normalizeWidth,
                       attachment_search: attachmentSearch, link_search: linkSearch,
                       append_customer_name: appendCustomerName,
-                      resolve_customer_name: resolveCustomerName,
                       dedupe: dedupe};
     for(const [key, id] of Object.entries(SETTINGS_FIELDS)){
         settings[key] = document.getElementById(id).value;
@@ -200,8 +190,6 @@ function applySettings(settings){
     syncLinkSearchButton();
     appendCustomerName = !!settings.append_customer_name;
     syncAppendCustomerNameButton();
-    resolveCustomerName = !!settings.resolve_customer_name;
-    syncResolveCustomerNameButton();
     dedupe = !!settings.dedupe;
     syncDedupeButton();
     // Reveal an exclude field if it carries a value.

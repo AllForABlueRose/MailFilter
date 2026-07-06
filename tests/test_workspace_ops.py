@@ -11,6 +11,7 @@ import csv
 import io
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -62,40 +63,6 @@ class _FakeStore:
         return list(self._mails)
 
 
-class SenderOrgMatchesTests(unittest.TestCase):
-    def setUp(self):
-        self.store = _FakeStore([
-            make_mail(id="m1", sender_email="bob@acme.com"),
-            make_mail(id="m2", sender_email="eve@nobody.com"),
-            make_mail(id="m3", sender_email="sue@acme.com"),
-        ])
-        self.wanted = {"m1", "m2", "m3"}
-
-    def test_representative_preferred_over_member(self):
-        # acme.com is a member of Base Inc but represents Acme Corp — rep wins.
-        orgs = [
-            {"id": "1", "name": "Base Inc",
-             "domains": [{"domain": "acme.com", "role": "member"}], "contacts": []},
-            {"id": "2", "name": "Acme Corp",
-             "domains": [{"domain": "acme.com", "role": "representative"}], "contacts": []},
-        ]
-        out = workspace_ops._sender_org_matches(self.store, self.wanted, orgs)
-        self.assertEqual(out.get("m1"), {"org_id": "2", "org_name": "Acme Corp"})
-        self.assertEqual(out.get("m3"), {"org_id": "2", "org_name": "Acme Corp"})
-
-    def test_member_used_when_no_representative(self):
-        orgs = [{"id": "1", "name": "Acme Corp",
-                 "domains": [{"domain": "acme.com", "role": "member"}], "contacts": []}]
-        self.assertEqual(workspace_ops._sender_org_matches(self.store, self.wanted, orgs).get("m1"),
-                         {"org_id": "1", "org_name": "Acme Corp"})
-
-    def test_unresolved_sender_absent(self):
-        orgs = [{"id": "1", "name": "Acme Corp",
-                 "domains": [{"domain": "acme.com", "role": "member"}], "contacts": []}]
-        out = workspace_ops._sender_org_matches(self.store, self.wanted, orgs)
-        self.assertNotIn("m2", out)  # eve@nobody.com belongs to no org
-
-
 class SaveAttachmentsAppendTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -133,44 +100,6 @@ class SaveAttachmentsAppendTests(unittest.TestCase):
         self.assertEqual(by_id["m2"], "report.pdf")            # sender in no org
 
 
-class BruteForceOrgMatchesTests(unittest.TestCase):
-    """The Brute Force Resolve keyword->org content matcher (shared resolver)."""
-
-    def setUp(self):
-        self.store = _FakeStore([
-            make_mail(id="m1", subject="Re: Globex Industries account", body="hi"),
-            make_mail(id="m2", subject="ticket", body="mentions globex industries here"),
-            make_mail(id="m3", subject="ticket", body="nothing relevant"),
-        ])
-        self.wanted = {"m1", "m2", "m3"}
-        self.orgs = [{"id": "o-glo", "name": "Globex Inc"}]
-        self.mappings = [{"keyword": "Globex Industries", "org_id": "o-glo"}]
-
-    def test_matches_in_subject_or_body_case_insensitively(self):
-        out = workspace_ops._brute_force_org_matches(
-            self.store, self.wanted, self.mappings, self.orgs)
-        self.assertEqual(out.get("m1"), {"org_id": "o-glo", "org_name": "Globex Inc"})  # subject
-        self.assertEqual(out.get("m2"), {"org_id": "o-glo", "org_name": "Globex Inc"})  # body
-        self.assertNotIn("m3", out)                                                     # no match
-
-    def test_first_keyword_in_list_order_wins(self):
-        m = _FakeStore([make_mail(id="x", body="Acme and Globex both appear")])
-        orgs = [{"id": "a", "name": "Acme Org"}, {"id": "g", "name": "Globex Org"}]
-        mappings = [{"keyword": "Globex", "org_id": "g"}, {"keyword": "Acme", "org_id": "a"}]
-        out = workspace_ops._brute_force_org_matches(m, {"x"}, mappings, orgs)
-        self.assertEqual(out["x"], {"org_id": "g", "org_name": "Globex Org"})
-
-    def test_keyword_mapped_to_missing_org_is_absent(self):
-        mappings = [{"keyword": "Globex Industries", "org_id": "deleted"}]
-        out = workspace_ops._brute_force_org_matches(
-            self.store, self.wanted, mappings, self.orgs)
-        self.assertEqual(out, {})
-
-    def test_empty_mappings_matches_nothing(self):
-        self.assertEqual(
-            workspace_ops._brute_force_org_matches(self.store, self.wanted, [], self.orgs), {})
-
-
 class SaveAttachmentsResolveTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -200,9 +129,22 @@ class SaveAttachmentsResolveTests(unittest.TestCase):
                         side_effect=lambda mid, idx: (None, b"bytes")):
             return workspace_ops.save_attachments(self.store, items, **kw)
 
-    def test_resolve_works_on_its_own(self):
-        _folder, saved, _errors = self._save(
+    def test_resolve_alone_records_org_but_appends_nothing(self):
+        # Brute Force on but Append off: the suffix is gated by append, so file names
+        # are unchanged — yet the resolved (keyword) org is still recorded in the
+        # manifest as the single source of truth.
+        folder, saved, _errors = self._save(
             resolve_customer=True, customer_mappings=self.mappings, orgs=self.orgs)
+        by_id = {s["id"]: s["name"] for s in saved}
+        self.assertEqual(by_id["m1"], "a.pdf")
+        self.assertEqual(by_id["m2"], "b.pdf")
+        self.assertEqual(workspace_manifest.lookup(folder, "a.pdf")["org_name"], "Globex Inc")
+        self.assertEqual(workspace_manifest.lookup(folder, "b.pdf")["org_name"], "Globex Inc")
+
+    def test_resolve_and_append_appends_keyword_org(self):
+        folder, saved, _errors = self._save(
+            append_org_name=True, resolve_customer=True,
+            customer_mappings=self.mappings, orgs=self.orgs)
         by_id = {s["id"]: s["name"] for s in saved}
         self.assertEqual(by_id["m1"], "a_Globex Inc.pdf")
         self.assertEqual(by_id["m2"], "b_Globex Inc.pdf")
@@ -253,10 +195,23 @@ class SaveAttachmentsManifestTests(unittest.TestCase):
         # File bytes are the raw attachment, untouched.
         self.assertEqual((Path(folder) / by_id["m1"]).read_bytes(), raw)
         # Resolved mail carries the org; unresolved mail is still recorded, org blank.
+        # Both record the originating mail's received datetime.
         self.assertEqual(workspace_manifest.lookup(folder, by_id["m1"]),
-                         {"org_id": "2", "org_name": "Globex Inc", "mail_id": "m1"})
+                         {"org_id": "2", "org_name": "Globex Inc", "mail_id": "m1",
+                          "received": "2026-06-10 09:30:00"})
         self.assertEqual(workspace_manifest.lookup(folder, by_id["m2"]),
-                         {"org_id": "", "org_name": "", "mail_id": "m2"})
+                         {"org_id": "", "org_name": "", "mail_id": "m2",
+                          "received": "2026-06-10 09:30:00"})
+
+    def test_download_stamped_with_mail_datetime(self):
+        raw = b"bytes"
+        items = [{"id": "m1", "index": 0}]
+        with mock.patch("mailfilter.outlook.fetch_attachment",
+                        side_effect=lambda mid, idx: ("pic.png", raw)):
+            folder, saved, _errors = workspace_ops.save_attachments(self.store, items)
+        target = Path(folder) / saved[0]["name"]
+        expected = datetime.strptime("2026-06-10 09:30:00", config.RECEIVED_FORMAT).timestamp()
+        self.assertEqual(target.stat().st_mtime, expected)
 
 
 class WriteReportTests(unittest.TestCase):

@@ -47,6 +47,7 @@ function createCard(mail){
     if(tags.marked){ cornerTags.appendChild(makeTag('🎯', 'Marked', tags.marked)); }
     if(tags.downloaded){ cornerTags.appendChild(makeTag('📥', 'Attachments downloaded', tags.downloaded)); }
     if(tags.links){ cornerTags.appendChild(makeTag('🌐', 'Links opened', tags.links)); }
+    if(tags.deduped){ cornerTags.appendChild(makeTag('🧬', 'Deduplicated', tags.deduped)); }
     // A detected password (from the last Smart Password Detection scan). The
     // value itself lives in the resources area (renderPasswordGroup), not here.
     if(mail.has_password){ cornerTags.appendChild(makePasswordBadge()); }

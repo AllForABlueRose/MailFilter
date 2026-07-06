@@ -67,6 +67,18 @@ class DedupeTests(unittest.TestCase):
         self.assertEqual(hidden, {"NOTE"})
         self.assertEqual(twin, {"ORIG": [LINK], "ORIG2": [LINK]})
 
+    def test_link_less_notification_still_captures_the_twin(self):
+        # A notification with no URL still hides and still yields the twin (mapped to
+        # []), so the "deduped" tag can mark every processed twin.
+        note_no_link = dict(id="NOTE2", subject="New ticket created",
+                            received="2026-06-10 09:40:00",
+                            body="A ticket was opened.\nSubject: Server error report\n"
+                                 "Body: Disk full on node 3")
+        snap = _snap([make_mail(**note_no_link), make_mail(**ORIG)])
+        hidden, twin = dedup.dedupe(snap, "New ticket created")
+        self.assertEqual(hidden, {"NOTE2"})
+        self.assertEqual(twin, {"ORIG": []})
+
     def test_no_notification_means_no_change(self):
         snap = _snap([make_mail(**ORIG)])
         self.assertEqual(dedup.dedupe(snap, "New ticket created"), (set(), {}))

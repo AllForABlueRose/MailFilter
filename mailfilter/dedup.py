@@ -26,8 +26,10 @@ def dedupe(mails, subject):
     """Return ``(hidden_ids, twin_links)`` for the given ``subject``.
 
     ``hidden_ids`` is the set of notification mail ids that matched a twin (to hide);
-    ``twin_links`` maps a twin mail id to the de-duplicated list of URLs to append to
-    it. A blank ``subject`` (or no matches) yields ``(set(), {})``.
+    ``twin_links`` maps **every** matched twin mail id to the de-duplicated list of
+    URLs to append to it — a twin whose notification carried no link maps to ``[]``
+    (so callers can still tag every twin that was processed). A blank ``subject`` (or
+    no matches) yields ``(set(), {})``.
 
     A mail is a **notification** when its subject *exactly* equals ``subject``
     (case-insensitive, trimmed). A candidate is a **twin** of notification ``N`` when
@@ -64,9 +66,10 @@ def dedupe(mails, subject):
                 continue
             if cand_subject.lower() in note_body and cand_body.lower() in note_body:
                 hidden.add(note_id)
-                if note_links:
-                    bucket = twin_links.setdefault(cand.get("id"), [])
-                    for url in note_links:
-                        if url not in bucket:
-                            bucket.append(url)
+                # Record the twin unconditionally (so link-less twins can be tagged);
+                # append the notification's links when it had any.
+                bucket = twin_links.setdefault(cand.get("id"), [])
+                for url in note_links:
+                    if url not in bucket:
+                        bucket.append(url)
     return hidden, twin_links

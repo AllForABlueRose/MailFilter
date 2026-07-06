@@ -4,10 +4,12 @@ folder. The zip-with-key and Excel-decrypt paths need optional packages and are
 skipped when those aren't importable; the keyless zip path uses only the stdlib."""
 
 import importlib.util
+import os
 import shutil
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import config
@@ -192,6 +194,77 @@ class ExcelUnlockTests(UnlockOpsBase):
             "key_kind": "temporary", "file_kind": "excel"}})
         self.assertEqual(len(res["errors"]), 1)
         self.assertEqual((self.folder / "book.xlsx").read_bytes(), original)
+
+
+class ZipNameDecodingTests(UnlockOpsBase):
+    """Japanese (Shift-JIS/cp932) entry names, stored without the UTF-8 flag,
+    come out correctly instead of as 文字化け mojibake."""
+
+    class _Info:
+        def __init__(self, filename, flag_bits):
+            self.filename = filename
+            self.flag_bits = flag_bits
+
+    def test_legacy_shift_jis_name_recovered(self):
+        # zipfile mis-decodes cp932 bytes as CP437 when bit 0x800 is clear.
+        raw = "見積書.txt".encode("cp932")
+        info = self._Info(raw.decode("cp437"), 0)
+        self.assertEqual(unlock_ops._decode_zip_name(info), "見積書.txt")
+
+    def test_utf8_flagged_name_unchanged(self):
+        info = self._Info("日本語.txt", 0x800)
+        self.assertEqual(unlock_ops._decode_zip_name(info), "日本語.txt")
+
+    def test_extract_members_writes_japanese_name(self):
+        src_zip = self.folder / "jp.zip"
+        with zipfile.ZipFile(src_zip, "w") as z:
+            z.writestr("placeholder.txt", b"data")
+        extract_dir = self.folder / "out"
+        extract_dir.mkdir()
+        # Simulate a legacy archive: rewrite the in-memory entry as CP437-mis-decoded
+        # Shift-JIS with the UTF-8 flag cleared (orig_filename is left intact so the
+        # local-header content read still succeeds).
+        legacy = "見積書.txt".encode("cp932").decode("cp437")
+        with zipfile.ZipFile(src_zip) as z:
+            for info in z.infolist():
+                info.filename = legacy
+                info.flag_bits &= ~0x800
+            unlock_ops._extract_members(z, extract_dir)
+        self.assertEqual([p.name for p in extract_dir.iterdir()], ["見積書.txt"])
+
+    def test_safe_extract_dest_rejects_zip_slip(self):
+        with self.assertRaises(ValueError):
+            unlock_ops._safe_extract_dest(self.folder, "../escape.txt")
+
+
+class DatetimeInheritanceTests(UnlockOpsBase):
+    """Unlock outputs inherit the originating mail's datetime (manifest ``received``),
+    falling back to the source file's mtime for files with no mail origin."""
+
+    def test_zip_output_inherits_manifest_received(self):
+        with zipfile.ZipFile(self.folder / "pack.zip", "w") as z:
+            z.writestr("inner.txt", b"hi")
+        self._record("pack.zip", {"org_id": "o1", "org_name": "Acme Corp",
+                                  "mail_id": "m1", "received": "2026-05-05 08:00:00"})
+        unlock_ops.unlock_files({"pack.zip": _zip_assignment()})
+        out = self.folder / "inner_Acme Corp.txt"
+        self.assertTrue(out.exists())
+        expected = datetime.strptime("2026-05-05 08:00:00", config.RECEIVED_FORMAT).timestamp()
+        self.assertEqual(out.stat().st_mtime, expected)
+
+    def test_external_zip_output_inherits_source_mtime(self):
+        zpath = self.folder / "ext.zip"
+        with zipfile.ZipFile(zpath, "w") as z:
+            z.writestr("inner.txt", b"hi")
+        # No manifest entry -> external file, so outputs inherit the archive's mtime.
+        src_ts = datetime.strptime("2020-01-02 03:04:00", config.RECEIVED_FORMAT).timestamp()
+        os.utime(zpath, (src_ts, src_ts))
+        unlock_ops.unlock_files({"ext.zip": {
+            "secret": None, "org_id": "", "org_name": "",
+            "key_kind": None, "file_kind": "zip"}})
+        out = self.folder / "inner.txt"
+        self.assertTrue(out.exists())
+        self.assertEqual(out.stat().st_mtime, src_ts)
 
 
 if __name__ == "__main__":

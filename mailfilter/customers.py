@@ -192,34 +192,60 @@ def _org_label(org):
     return {"name": display, "color": org.get("color", "")}
 
 
-def label_resolver(orgs):
-    """Return ``email -> [{name, color}]`` resolving a sender to its org label(s).
+# Public alias: the mail-list pill for a single resolved org (display name + colour).
+org_label = _org_label
 
-    The resolution maps are built **once** so a caller can label every mail in a
-    list without rebuilding them per call. A sender resolves on both axes (§3.12):
-    the label list is the base-membership org followed by the represented org when
-    it is a *different* org (deduplicated by id), each a display-name/colour pill.
-    Empty for an unresolved or non-SMTP address. Pure — no HTML; the frontend
-    inserts ``name`` as DOM text (the people-field rule).
+
+def mail_org_resolver(orgs, mappings=None):
+    """Return ``mail -> org|None`` — the **single source** of a mail item's customer
+    organization, shared by the mail-list pill, the download file name, and the CSV
+    report so they never disagree.
+
+    Hierarchy, first match wins:
+
+    1. **Brute Force** keyword — only when ``mappings`` is given (the "Suspected
+       Customers List", ``[{keyword, org_id}, ...]``): the first keyword (in list
+       order) found in the mail's ``subject``/``body`` (case-insensitively) whose
+       ``org_id`` is a live org. A matched keyword mapped to a missing org yields no
+       brute-force hit and falls through to the sender.
+    2. **Representative** — the sender resolves (email override > domain) to an org
+       they are a *representative of*.
+    3. **Member** — else the sender's base-membership org.
+
+    Returns the org dict from ``orgs`` (callers read ``id``/``name``/``display_name``/
+    ``color`` per their need), or ``None``. The maps and cleaned keyword list are
+    built **once** so a whole list resolves without rebuilding them; pass
+    ``mappings=None`` (or ``[]``) to disable the brute-force tier — e.g. when its
+    experimental feature is off. Pure: no store, no HTML.
     """
     maps = _resolution_maps(orgs)
+    orgs_by_id = {o.get("id"): o for o in orgs or []}
+    cleaned = [(str(m.get("keyword") or "").strip().lower(), str(m.get("org_id") or ""))
+               for m in (mappings or [])
+               if str((m or {}).get("keyword") or "").strip()]
 
-    def resolve_labels(email):
-        email = _normalize_email(email)
-        if not email:
-            return []
-        domain = _domain_of(email)
-        member_org = maps["member_email"].get(email) or maps["member_domain"].get(domain)
-        rep_org = maps["rep_email"].get(email) or maps["rep_domain"].get(domain)
-        labels, seen = [], set()
-        for org in (member_org, rep_org):
-            if org is None or org.get("id") in seen:
-                continue
-            seen.add(org.get("id"))
-            labels.append(_org_label(org))
-        return labels
+    def resolve_one(mail):
+        if cleaned:
+            content = (mail.get("subject", "") + "\n" + mail.get("body", "")).lower()
+            for keyword, org_id in cleaned:
+                if keyword in content:
+                    org = orgs_by_id.get(org_id)
+                    if org is not None:
+                        return org
+                    break  # first keyword hit decides; missing org -> fall to sender
+        email = _normalize_email(mail.get("sender_email", ""))
+        if email:
+            domain = _domain_of(email)
+            return (maps["rep_email"].get(email) or maps["rep_domain"].get(domain)
+                    or maps["member_email"].get(email) or maps["member_domain"].get(domain))
+        return None
 
-    return resolve_labels
+    return resolve_one
+
+
+def resolve_mail_org(mail, orgs, mappings=None):
+    """One-shot :func:`mail_org_resolver` for a single mail (see it for the hierarchy)."""
+    return mail_org_resolver(orgs, mappings)(mail)
 
 
 def build_directory(mails, orgs):

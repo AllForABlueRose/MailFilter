@@ -19,7 +19,9 @@ from . import persistence
 log = logging.getLogger(__name__)
 
 RECENT_DAYS = 7
-ACTIONS = ("downloaded", "links", "marked")
+# "deduped" is recorded once per twin the Brute Force Mail Deduplication feature
+# folds a notification into (via record_once), so it ages from first processing.
+ACTIONS = ("downloaded", "links", "marked", "deduped")
 _TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -51,6 +53,19 @@ class TagStore:
         now = datetime.now().strftime(_TS_FORMAT)
         with self._lock:
             self._tags.setdefault(mail_id, {})[action] = now
+            self._save()
+
+    def record_once(self, mail_id, action):
+        """Like :meth:`record`, but only if ``action`` isn't already set — preserving
+        the original timestamp. For auto-applied tags recorded on a polled GET (e.g.
+        "deduped"), this keeps recency ageing from first processing instead of being
+        re-stamped (and re-saved) on every poll."""
+        if not mail_id or action not in ACTIONS:
+            return
+        with self._lock:
+            if action in self._tags.get(mail_id, {}):
+                return
+            self._tags.setdefault(mail_id, {})[action] = datetime.now().strftime(_TS_FORMAT)
             self._save()
 
     def remove(self, mail_id, action):

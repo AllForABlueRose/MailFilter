@@ -2,7 +2,8 @@
 
 Records which customer organization each file this app downloaded into a
 ``<WORKSPACE_DIR>/<YYYY-MM-DD>/`` folder belongs to, as a small JSON map
-``{filename: {"org_id", "org_name", "mail_id"}}`` stored INSIDE that folder under
+``{filename: {"org_id", "org_name", "mail_id", "received"}}`` stored INSIDE that
+folder under
 ``config.WORKSPACE_MANIFEST_NAME`` and encoded at rest through the ordinary
 ``persistence``/``crypto`` seam (it carries no secrets).
 
@@ -35,7 +36,11 @@ from . import persistence
 
 log = logging.getLogger(__name__)
 
-_FIELDS = ("org_id", "org_name", "mail_id")
+# ``received`` is the originating mail's datetime (``config.RECEIVED_FORMAT``),
+# blank for files with no mail origin. It is the source of truth for stamping a
+# file's timestamp and for the Unlock Station's newest->oldest key pairing, so it
+# survives later encryption alongside the org fields.
+_FIELDS = ("org_id", "org_name", "mail_id", "received")
 
 
 def _path(folder):

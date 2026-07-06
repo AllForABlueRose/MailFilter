@@ -36,6 +36,33 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(store.tags_for("m1"), {"downloaded": "recent", "links": "recent"})
 
 
+class RecordOnceTests(unittest.TestCase):
+    def test_records_a_fresh_action_as_recent(self):
+        store = _store()
+        store.record_once("m1", "deduped")
+        self.assertEqual(store.tags_for("m1"), {"deduped": "recent"})
+
+    def test_does_not_restamp_an_existing_old_tag(self):
+        # A twin processed over a week ago must stay "old" — record_once preserves the
+        # first-processed timestamp instead of refreshing it on every poll.
+        store = _store()
+        old = (datetime.now() - timedelta(days=RECENT_DAYS + 1)).strftime(_TS)
+        store._tags = {"m1": {"deduped": old}}
+        store.record_once("m1", "deduped")
+        self.assertEqual(store.tags_for("m1"), {"deduped": "old"})
+
+    def test_unknown_action_ignored(self):
+        store = _store()
+        store.record_once("m1", "bogus")
+        self.assertEqual(store.tags_for("m1"), {})
+
+    def test_coexists_with_other_actions(self):
+        store = _store()
+        store.record("m1", "marked")
+        store.record_once("m1", "deduped")
+        self.assertEqual(store.tags_for("m1"), {"marked": "recent", "deduped": "recent"})
+
+
 class RemoveTests(unittest.TestCase):
     def test_remove_clears_one_action(self):
         store = _store()

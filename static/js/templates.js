@@ -8,7 +8,7 @@
 // normalization toggle are per-session choices, so they're ignored when matching
 // the active template and re-applied from the live search after switching.
 const TEMPLATE_EXCLUDED_FIELDS = ['start', 'end', 'normalize_width',
-                                  'append_customer_name', 'resolve_customer_name'];
+                                  'append_customer_name'];
 
 // Fetch the template list and render the dropdown. Called once at startup.
 async function loadTemplates(){
@@ -86,8 +86,6 @@ function applyPreservedTemplateFields(preserved){
     syncNormalizeWidthButton();
     appendCustomerName = !!preserved.append_customer_name;
     syncAppendCustomerNameButton();
-    resolveCustomerName = !!preserved.resolve_customer_name;
-    syncResolveCustomerNameButton();
 }
 
 async function saveTemplate(){

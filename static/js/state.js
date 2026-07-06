@@ -8,8 +8,7 @@ let passwordSettings = null;     // last loaded /api/password-settings (patterns
 let normalizeWidth = false;      // experimental: fold full-width<->half-width on keyword search
 let attachmentSearch = false;    // experimental: main/exclude keyword match also covers attachment names
 let linkSearch = false;          // experimental: main/exclude keyword match also covers link URLs
-let appendCustomerName = false;  // experimental: append sender's org name to batch-downloaded files
-let resolveCustomerName = false; // experimental: Brute Force Resolve — keyword->org mapping resolved from mail content
+let appendCustomerName = false;  // experimental: append the resolved org name to batch-downloaded files
 let dedupe = false;              // experimental: Brute Force Mail Deduplication — hide Zendesk notification mails, graft their link onto the twin
 let experimentalEnabled = {};    // feature id -> bool, last loaded /api/experimental (which controls are mounted)
 

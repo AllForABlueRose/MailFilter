@@ -237,8 +237,7 @@ function downloadTrayAttachments(){
     fetch('/api/download', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({items, append_customer_name: appendCustomerName,
-                              resolve_customer_name: resolveCustomerName}),
+        body: JSON.stringify({items, append_customer_name: appendCustomerName}),
     }).then(r => r.json()).then(result => {
         // Server persisted the "downloaded" tag; reflect it immediately.
         const ids = new Set((result.saved || []).map(s => s.id));
@@ -320,6 +319,8 @@ const COLLECT_LABELS = [
     {action: 'downloaded', recency: 'old',    symbol: '📥', name: 'Downloaded (7+ days)', grey: true},
     {action: 'links',      recency: 'recent', symbol: '🌐', name: 'Links opened'},
     {action: 'links',      recency: 'old',    symbol: '🌐', name: 'Links opened (7+ days)', grey: true},
+    {action: 'deduped',    recency: 'recent', symbol: '🧬', name: 'Deduplicated'},
+    {action: 'deduped',    recency: 'old',    symbol: '🧬', name: 'Deduplicated (7+ days)', grey: true},
     {name: 'Password detected', symbol: '🔑', match: m => !!m.has_password},
 ];
 

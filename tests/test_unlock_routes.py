@@ -7,11 +7,12 @@ import shutil
 import tempfile
 import unittest
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import config
-from mailfilter import create_app, vault_crypto, workspace_manifest
+from mailfilter import create_app, unlock_ops, vault_crypto, workspace_manifest
 
 _ISOLATED = (
     "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
@@ -103,6 +104,59 @@ class UnlockRouteTests(unittest.TestCase):
         self.assertEqual(res["errors"], [])
         self.assertEqual(len(res["unlocked"]), 1)
         self.assertTrue((folder / "inner_Acme Corp.txt").exists())
+
+    def _temp_key(self, secret, scan_dt):
+        return self.client.post("/api/vault/entries", json={
+            "org_id": self.org["id"], "label": secret, "secret": secret,
+            "kind": "temporary", "scan_dt": scan_dt}).get_json()
+
+    def _zip_with_received(self, name, received):
+        folder = self._today()
+        with zipfile.ZipFile(folder / name, "w") as z:
+            z.writestr("inner.txt", b"payload")
+        workspace_manifest.record(str(folder), name, {
+            "org_id": self.org["id"], "org_name": "Acme Corp", "mail_id": "m1",
+            "received": received})
+        return folder
+
+    def _smart_unlock_assignments(self):
+        """Run smart-unlock with the engine patched out, returning the resolver's
+        {filename: assignment} map so key->file pairing can be asserted directly."""
+        captured = {}
+        def _capture(assignments):
+            captured.update(assignments)
+            return {"folder": "", "unlocked": [], "errors": []}
+        with mock.patch.object(unlock_ops, "unlock_files", side_effect=_capture):
+            self.client.post("/api/workspace/smart-unlock", json={})
+        return captured
+
+    def _recent(self, hours_ago):
+        # scan_dt within VAULT_TEMP_HIDE_AFTER_DAYS so the temporary key isn't pruned.
+        return (datetime.now() - timedelta(hours=hours_ago)).strftime(config.RECEIVED_FORMAT)
+
+    def test_smart_unlock_pairs_multiple_files_newest_to_oldest(self):
+        # Two temporary keys (newest first: sNew, then sOld) and three zips.
+        self._temp_key("sOld", self._recent(2))
+        self._temp_key("sNew", self._recent(1))
+        self._zip_with_received("old.zip", "2026-01-01 09:00:00")
+        self._zip_with_received("mid.zip", "2026-02-02 09:00:00")
+        self._zip_with_received("new.zip", "2026-03-03 09:00:00")
+        self.client.post("/api/workspace/record-assignment", json={"records": [
+            {"org_id": self.org["id"], "file_kind": "zip", "key_kind": "temporary"}]})
+        captured = self._smart_unlock_assignments()
+        # newest file -> newest key, next -> older key, oldest file left unassigned.
+        self.assertEqual(captured["new.zip"]["secret"], "sNew")
+        self.assertEqual(captured["mid.zip"]["secret"], "sOld")
+        self.assertIsNone(captured["old.zip"]["secret"])
+
+    def test_smart_unlock_single_file_uses_newest_key(self):
+        self._temp_key("sOld", self._recent(2))
+        self._temp_key("sNew", self._recent(1))
+        self._zip_with_received("solo.zip", "2026-03-03 09:00:00")
+        self.client.post("/api/workspace/record-assignment", json={"records": [
+            {"org_id": self.org["id"], "file_kind": "zip", "key_kind": "temporary"}]})
+        captured = self._smart_unlock_assignments()
+        self.assertEqual(captured["solo.zip"]["secret"], "sNew")
 
 
 if __name__ == "__main__":
