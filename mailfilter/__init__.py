@@ -19,8 +19,9 @@ from flask import Flask
 
 import config
 
-from . import automation, bootstrap, outlook
+from . import automation, bootstrap, calendar_ops, outlook
 from .automation_store import AutomationStore
+from .calendar_store import CalendarStore
 from .compose_template_store import ComposeTemplateStore
 from .customer_match_store import CustomerMatchStore
 from .customer_store import CustomerStore
@@ -72,6 +73,10 @@ def create_app():
     customer_match = CustomerMatchStore(config.CUSTOMER_MATCH_FILE)
     customer_match.load()
 
+    # Workshop → Calendar file pins (records only; calendar_ops does the file work).
+    calendar = CalendarStore(config.CALENDAR_PINS_FILE)
+    calendar.load()
+
     # The Key Vault reads its files lazily (and only decrypts once unlocked), so
     # there is nothing to load at startup — it begins locked.
     vault = VaultStore(config.VAULT_FILE, config.VAULT_INDEX_FILE, config.VAULT_KEY_DPAPI_FILE)
@@ -79,7 +84,7 @@ def create_app():
     app.register_blueprint(
         create_blueprint(store, settings, tags, templates, automations, customers,
                          compose_templates, password_settings, experimental,
-                         customer_match, vault)
+                         customer_match, vault, calendar)
     )
 
     # Exposed for the entry point and for tests.
@@ -100,6 +105,12 @@ def create_app():
     app.extensions["experimental_store"] = experimental
     app.extensions["customer_match_store"] = customer_match
     app.extensions["vault_store"] = vault
+    app.extensions["calendar_store"] = calendar
+    # Startup pin materialization ("whenever the server is started"): move any file
+    # pinned to today from limbo into today's workspace folder. Pure filesystem work
+    # (no threads/Outlook), but left for the entry point to call so importing the app
+    # in tests never creates folders — keeping create_app() import-safe.
+    app.extensions["calendar_materializer"] = lambda: calendar_ops.materialize_due(calendar)
     app.extensions["mail_initializer"] = lambda: _start_initializer(store)
     # Each periodic refresh fetches + syncs mail, then runs the SDS scan (read-only;
     # captures into the vault only while it is unlocked).

@@ -34,8 +34,27 @@ async function init(){
     document.getElementById('vaultEntryModal').addEventListener('click', e => {
         if(e.target.id === 'vaultEntryModal'){ closeVaultEntry(); }
     });
+    document.getElementById('calendarPinModal').addEventListener('click', e => {
+        if(e.target.id === 'calendarPinModal'){ closeCalendarPin(); }
+    });
     document.addEventListener('keydown', e => {
-        if(e.key === 'Escape'){ closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor(); closePasswordSettings(); closeExperimental(); closeSuspectedCustomers(); closeVaultEntry(); return; }
+        if(e.key === 'Escape'){
+            // If a modal is open, Escape closes it; otherwise, on a Workshop
+            // sub-screen it steps back to the hub (the Workshop "Back" binding).
+            const modalIds = ['threadModal','automationModal','bulkTemplateModal',
+                'passwordModal','experimentalModal','suspectedCustomersModal',
+                'vaultEntryModal','calendarPinModal'];
+            const anyModalOpen = modalIds.some(id => {
+                const m = document.getElementById(id); return m && !m.hidden;
+            });
+            closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor();
+            closePasswordSettings(); closeExperimental(); closeSuspectedCustomers();
+            closeVaultEntry(); closeCalendarPin();
+            const wsView = document.getElementById('view-workshop');
+            const wsActive = wsView && !wsView.classList.contains('view-hidden');
+            if(!anyModalOpen && wsActive && workshopScreen !== 'hub'){ workshopBack(); }
+            return;
+        }
         if(e.key !== 'Enter') return;
         // Enter runs the search from anywhere (even after dragging moved focus
         // out of the sidebar). Let buttons/links/textareas keep their own Enter,
@@ -49,6 +68,7 @@ async function init(){
         if(!document.getElementById('experimentalModal').hidden) return;
         if(!document.getElementById('suspectedCustomersModal').hidden) return;
         if(!document.getElementById('vaultEntryModal').hidden) return;
+        if(!document.getElementById('calendarPinModal').hidden) return;
         e.preventDefault();
         applyFilters();
     });

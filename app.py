@@ -26,6 +26,10 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("werkzeug").addFilter(_MutePollingAccessLog())
+    # Materialize any Calendar pins whose day is today: move the pinned file from
+    # limbo into today's workspace folder (and recreate its manifest record). Pure
+    # filesystem, idempotent, runs once at startup before serving requests.
+    app.extensions["calendar_materializer"]()
     # Attempt to bring Outlook Desktop online in the background to pull the
     # latest mail; on failure this logs the error and falls back to the
     # cached mail. The periodic scheduler then keeps it up to date.

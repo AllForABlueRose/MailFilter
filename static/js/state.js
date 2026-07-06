@@ -58,3 +58,16 @@ let unlockAssignments = {};      // filename -> assigned vault entry_id (drag-dr
 let unlockLastUnlocked = [];     // {org_id, file_kind, key_kind} from the last successful unlock (feeds Record)
 let unlockKeySearch = "";        // key-explorer search query
 let unlockFileSearch = "";       // file-explorer search query
+
+// Workshop hub navigation + Key Vault reveal gateway.
+let workshopScreen = 'hub';      // 'hub' | 'vault' | 'calendar' (the visible Workshop sub-screen)
+let vaultKeysRevealed = false;   // on the vault screen, has the user pressed "View keys" after unlocking?
+
+// Workshop → Calendar (file pins onto days).
+let calendarYear = 0;            // year of the month currently shown (0 until first render)
+let calendarMonth = 0;           // 0-based month currently shown
+let calendarPins = [];           // last /api/calendar/pins listing [{id, date, filename, description, ...}]
+let calendarWorkspaceFiles = []; // today's workspace files (from /api/workspace/files) shown in the bottom half
+let calendarWorkspaceExists = false; // whether today's workspace folder exists
+let pendingPinFilename = "";     // filename awaiting a description in the pin modal
+let pendingPinDate = "";         // target day (YYYY-MM-DD) awaiting a description in the pin modal

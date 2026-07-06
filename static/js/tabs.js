@@ -38,9 +38,11 @@ function onTabEntered(name){
     if(name === "bulk" && typeof loadComposeTemplates === "function"){
         loadComposeTemplates();
     }
-    // Re-check the vault lock state (it can auto-lock) and re-render on entry.
-    if(name === "workshop" && typeof loadVault === "function"){
-        loadVault();
+    // Always land on the Workshop hub (its card menu); re-check the vault lock
+    // state (it can auto-lock) and re-render so the vault card is ready when opened.
+    if(name === "workshop"){
+        if(typeof resetWorkshop === "function"){ resetWorkshop(); }
+        if(typeof loadVault === "function"){ loadVault(); }
     }
 }
 

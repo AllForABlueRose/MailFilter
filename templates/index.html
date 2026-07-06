@@ -704,25 +704,59 @@
   <div class="auto-bar">
     <h2 class="auto-title">Workshop</h2>
   </div>
-  <p class="cust-hint">
-    Tools for working with your customers. <b>Key Vaults</b> stores
-    per-organization credentials, sealed with a master passphrase (AES-256-GCM) —
-    far stronger than the other caches, and used by workflows that need customer
-    keys. Secrets are kept only here; the customer cards show only that keys exist.
-  </p>
 
-  <div class="ws-section">
-    <h3 class="ws-section-title">🔐 Key Vaults</h3>
-    <!-- workshop.js fills this from /api/vault/status: unavailable / create /
-         unlock / unlocked-list. -->
-    <div id="vaultPanel" class="vault-panel"></div>
+  <!-- The Workshop is a hub of tool cards; each card opens its own screen (a
+       client-side sub-view toggled by workshop.js::showWorkshopScreen). A screen's
+       "← Back" button (also bound to Escape in main.js) returns here. -->
+  <div id="workshopHub" class="ws-hub">
+    <p class="cust-hint">
+      Tools for working with your customers. Open a card to get started.
+    </p>
+    <div class="ws-hub-cards">
+      <button type="button" class="ws-card" onclick="openWorkshopVault()">
+        <span class="ws-card-icon">🔐</span>
+        <span class="ws-card-title">Key Vaults</span>
+        <span class="ws-card-desc">Per-organization credentials, sealed with a
+          master passphrase (AES-256-GCM). Secrets live only here.</span>
+      </button>
+      <button type="button" class="ws-card" onclick="openWorkshopCalendar()">
+        <span class="ws-card-icon">📅</span>
+        <span class="ws-card-title">Calendar</span>
+        <span class="ws-card-desc">Pin a workspace file to a day; when that day
+          comes, it arrives in that day's workspace automatically.</span>
+      </button>
+    </div>
   </div>
 
-  <!-- Unlock Station: a bottom-right dock (toggle + action buttons) and a slide-in
-       panel (key explorer over today's workspace files). Built by unlockstation.js,
-       shown only while the vault is unlocked. Lives inside #view-workshop so it is
-       hidden automatically when another tab is active. -->
-  <div id="unlockRoot"></div>
+  <!-- Key Vault screen -->
+  <div id="workshopVault" class="ws-screen" hidden>
+    <div class="ws-screen-bar">
+      <button type="button" class="ws-back" onclick="workshopBack()">← Back</button>
+      <h3 class="ws-screen-title">🔐 Key Vaults</h3>
+    </div>
+    <!-- workshop.js fills this from /api/vault/status: unavailable / create /
+         unlock / unlocked-gateway ("View keys") / key list. -->
+    <div id="vaultPanel" class="vault-panel"></div>
+
+    <!-- Unlock Station: a bottom-right dock (toggle + action buttons) and a slide-in
+         panel (key explorer over today's workspace files). Built by unlockstation.js,
+         shown only while the vault is unlocked. Lives inside the vault screen so it is
+         hidden automatically off-tab and off-screen. -->
+    <div id="unlockRoot"></div>
+  </div>
+
+  <!-- Calendar screen (calendar.js): month grid on top, today's workspace on the
+       bottom; drag a file onto a day to pin it. -->
+  <div id="workshopCalendar" class="ws-screen" hidden>
+    <div class="ws-screen-bar">
+      <button type="button" class="ws-back" onclick="workshopBack()">← Back</button>
+      <h3 class="ws-screen-title">📅 Calendar</h3>
+    </div>
+    <div class="cal-layout">
+      <div id="calendarGrid" class="cal-grid-wrap"></div>
+      <div id="calendarWorkspace" class="cal-workspace"></div>
+    </div>
+  </div>
 </section>
 
 <div id="vaultEntryModal" class="modal-overlay" hidden>
@@ -763,6 +797,26 @@
   </div>
 </div>
 
+<!-- Calendar pin: confirm a drag-to-day pin with an optional "why" description. -->
+<div id="calendarPinModal" class="modal-overlay" hidden>
+  <div class="modal auto-modal">
+    <div class="modal-header">
+      <h2 id="calendarPinTitle">Pin file to day</h2>
+      <button class="icon-btn" onclick="closeCalendarPin()" title="Close">✕</button>
+    </div>
+    <div class="modal-body auto-form">
+      <p class="cal-pin-summary" id="calendarPinSummary"></p>
+      <label for="calendarPinDescription">Description <span class="auto-form-hint">(optional — why pin this?)</span></label>
+      <textarea id="calendarPinDescription" rows="3" maxlength="2000"
+                placeholder="e.g. send the signed contract on this date"></textarea>
+      <div id="calendarPinError" class="bulk-tmpl-error" hidden></div>
+    </div>
+    <div class="modal-actions auto-modal-actions">
+      <button type="button" class="auto-save-btn" onclick="confirmCalendarPin()">Pin</button>
+    </div>
+  </div>
+</div>
+
 <!-- Startup Key Vault login. Shown first on launch (workshop.js::showVaultLogin):
      create on first run, unlock otherwise, or Skip to use the rest of the app with
      the Password Manager locked. -->
@@ -789,6 +843,7 @@
 <script src="{{ url_for('static', filename='js/experimental.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workshop.js') }}"></script>
 <script src="{{ url_for('static', filename='js/unlockstation.js') }}"></script>
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

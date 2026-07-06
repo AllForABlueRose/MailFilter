@@ -22,6 +22,7 @@ import config
 from . import (
     automation,
     bulk_compose,
+    calendar_ops,
     customers,
     dedup,
     draft_ops,
@@ -137,7 +138,8 @@ def refresh_then_scan(store, password_settings, vault_store, customer_store,
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
                      customer_store, compose_template_store, password_settings,
-                     experimental_store, customer_match_store, vault_store):
+                     experimental_store, customer_match_store, vault_store,
+                     calendar_store):
     bp = Blueprint("mailfilter", __name__)
 
     def view_model(mail, query, resolve_labels=None):
@@ -533,6 +535,51 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
         assignments = _build_unlock_assignments(listing["files"], resolve_entry_id, entry_idx)
         return jsonify(unlock_ops.unlock_files(assignments))
+
+    # ----- Workshop → Calendar (file pins) -----
+
+    @bp.get("/api/calendar/pins")
+    def api_calendar_pins():
+        """Every calendar file pin, so the calendar can tag each day (see calendar_store)."""
+        return jsonify({"pins": calendar_store.snapshot()})
+
+    @bp.post("/api/calendar/pins")
+    def api_calendar_pin():
+        """Pin a today's-workspace file to a calendar day.
+
+        Body ``{date: "YYYY-MM-DD", filename, description?}``. Copies the file into
+        the limbo holding folder and records the pin (with the file's org metadata
+        from the source manifest). **404** when today's folder / the file is absent
+        or the date is malformed. No secrets, so no unlock gate.
+        """
+        body = request.get_json(silent=True) or {}
+        result = calendar_ops.pin_file(
+            calendar_store,
+            str(body.get("date") or ""),
+            str(body.get("filename") or ""),
+            str(body.get("description") or ""))
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error", "could not pin file")}), 404
+        return jsonify(result["pin"])
+
+    @bp.delete("/api/calendar/pins/<pid>")
+    def api_calendar_unpin(pid):
+        """Remove a pin and delete its (unconsumed) limbo copy."""
+        removed = calendar_ops.remove_pin(calendar_store, pid)
+        if not removed:
+            return jsonify({"error": "unknown pin"}), 404
+        return jsonify({"removed": pid})
+
+    @bp.post("/api/calendar/create-workspace")
+    def api_calendar_create_workspace():
+        """Create today's dated workspace folder so the calendar's bottom half is usable.
+
+        The "ask for workspace to be created" action shown when today has no
+        workspace folder yet. Idempotent (``exist_ok``). Returns the folder path.
+        """
+        folder = calendar_ops.today_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        return jsonify({"folder": str(folder), "exists": True})
 
     # ----- Automations -----
 

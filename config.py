@@ -45,6 +45,18 @@ WORKSPACE_MANIFEST_NAME = ".mailanalyzer_workspace.json"
 # moving the decompressed file(s) up into the dated workspace folder and deleting
 # the archive + this folder (see mailfilter/unlock_ops.py).
 UNLOCK_EXTRACT_DIRNAME = "._unlock_extract"
+# Workshop → Calendar. Pinned-file records: dragging a today's-workspace file onto
+# a calendar day copies its bytes into the "limbo" holding folder (a sibling of the
+# dated folders, WORKSPACE_DIR/<LIMBO>/) and records a pin. On server startup any
+# pin dated today is materialized — today's dated folder is (re)created, the limbo
+# copy moved in, and its workspace_manifest org record recreated — and the pin is
+# flagged materialized so a restart never re-copies (see mailfilter/calendar_store.py,
+# mailfilter/calendar_ops.py). The pins file is encoded at rest like the other
+# stores; it carries no secrets.
+CALENDAR_PINS_FILE = BASE_DIR / "calendar_pins.json"
+WORKSPACE_LIMBO_DIRNAME = "limbo"
+# Cap on a pin's optional free-text "why was this pinned" description.
+CALENDAR_PIN_DESCRIPTION_MAX = 2000
 # User-defined automations (saved-search workflows that run periodically). Same
 # encoded-at-rest JSON format as the other stores (see mailfilter/automation_store.py).
 AUTOMATIONS_FILE = BASE_DIR / "automations_cache.json"

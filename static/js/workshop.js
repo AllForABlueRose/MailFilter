@@ -17,6 +17,45 @@ function el(tag, className, text){
     return node;
 }
 
+// ----- Workshop hub navigation -----
+// The Workshop view is a hub of tool cards; each card opens a sub-screen. Exactly
+// one of hub / vault / calendar is visible. workshopBack() (and Escape, wired in
+// main.js) returns to the hub.
+
+function showWorkshopScreen(name){
+    workshopScreen = name;
+    const hub = document.getElementById("workshopHub");
+    const vault = document.getElementById("workshopVault");
+    const cal = document.getElementById("workshopCalendar");
+    if(hub) hub.hidden = name !== "hub";
+    if(vault) vault.hidden = name !== "vault";
+    if(cal) cal.hidden = name !== "calendar";
+}
+
+function openWorkshopVault(){
+    showWorkshopScreen("vault");
+    // Re-check the lock state and render the gate / gateway / key list.
+    loadVault();
+}
+
+function openWorkshopCalendar(){
+    showWorkshopScreen("calendar");
+    if(typeof loadCalendar === "function"){ loadCalendar(); }
+}
+
+function workshopBack(){
+    // Leaving the vault screen re-hides the keys, so re-entering asks for the
+    // "View keys" press again (the vault stays unlocked underneath).
+    if(workshopScreen === "vault"){ vaultKeysRevealed = false; }
+    showWorkshopScreen("hub");
+}
+
+// Reset to the hub whenever the Workshop tab is (re)entered (called from tabs.js).
+function resetWorkshop(){
+    vaultKeysRevealed = false;
+    showWorkshopScreen("hub");
+}
+
 async function vaultApi(path, method, body){
     try{
         const res = await fetch(path, {
@@ -66,9 +105,26 @@ function renderVaultPanel(){
     }
     if(!s.initialized){ panel.appendChild(buildCreateForm(() => loadMail())); syncUnlockStation(); return; }
     if(!s.unlocked){ panel.appendChild(buildUnlockForm(() => loadMail())); syncUnlockStation(); return; }
+    // Unlocked, but keys stay hidden until the user presses "View keys" — an
+    // explicit gateway between unlocking and the key list (per the Workshop tweak).
+    if(!vaultKeysRevealed){ panel.appendChild(buildKeysGateway()); syncUnlockStation(); return; }
     panel.appendChild(buildUnlockedView());
     // The Unlock Station dock/panel only exists while the vault is unlocked.
     syncUnlockStation();
+}
+
+// The post-unlock landing: the vault is open, but the key list is shown only after
+// an explicit press (Back / Escape returns to the Workshop hub without re-locking).
+function buildKeysGateway(){
+    const wrap = el("div", "vault-gate");
+    wrap.appendChild(el("p", "vault-note",
+        "The vault is unlocked. Press View keys to see your stored keys, or use "
+        + "Back (Escape) to return to the Workshop menu — the vault stays unlocked."));
+    const btn = el("button", "auto-save-btn", "View keys");
+    btn.type = "button";
+    btn.onclick = () => { vaultKeysRevealed = true; renderVaultPanel(); };
+    wrap.appendChild(btn);
+    return wrap;
 }
 
 // `onDone` runs after a successful create/unlock (e.g. hide the login overlay and
@@ -439,6 +495,7 @@ async function lockVault(){
     await vaultApi("/api/vault/lock", "POST");
     vaultSecrets = {}; vaultPinned = {}; vaultSearch = "";
     vaultRevealAll = false; vaultRevealAllPinned = false; vaultHoverId = null;
+    vaultKeysRevealed = false;   // re-locking drops back to the gateway on re-unlock
     await loadVault();
 }
 

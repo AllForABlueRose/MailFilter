@@ -1231,37 +1231,64 @@ input.drop-target{
     overflow:hidden;
     border-radius:0 0 10px 10px;
 }
-/* Waves: interlocking arcs tiled along the bottom form a wavy chain. */
-.org-scene.scene-wave{
-    --wc:color-mix(in srgb, var(--deco) 30%, transparent);
-    background-image:
-        radial-gradient(circle at 100% 50%, transparent 20%, var(--wc) 21% 34%, transparent 35%),
-        radial-gradient(circle at 0% 50%, transparent 20%, var(--wc) 21% 34%, transparent 35%);
-    background-size:20px 14px;
-    background-position:bottom;
-    background-repeat:repeat-x;
+/* Every scene shapes a --deco-mixed fill with an SVG mask (the silhouette),
+   so the colour still tracks each card's --deco. Both prefixed and standard
+   mask-* properties are set for Safari/older-Chromium coverage. */
+
+/* Waves: two smooth sine-crested bands — a taller, lighter swell behind and a
+   shorter, deeper swell in front, phase-shifted so they interleave. */
+.org-scene.scene-wave::before,
+.org-scene.scene-wave::after{
+    content:"";
+    position:absolute;
+    left:0; right:0; bottom:0;
+    -webkit-mask-repeat:repeat-x;
+    mask-repeat:repeat-x;
+    -webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 24' preserveAspectRatio='none'><path d='M0 12 C15 3 45 3 60 12 L60 24 0 24Z' fill='white'/></svg>");
+    mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 24' preserveAspectRatio='none'><path d='M0 12 C15 3 45 3 60 12 L60 24 0 24Z' fill='white'/></svg>");
 }
-/* Clouds: overlapping soft puffs sitting on the bottom edge. */
+.org-scene.scene-wave::before{
+    height:72%;
+    background:color-mix(in srgb, var(--deco) 18%, transparent);
+    -webkit-mask-size:104px 100%;
+    mask-size:104px 100%;
+    -webkit-mask-position:left bottom;
+    mask-position:left bottom;
+}
+.org-scene.scene-wave::after{
+    height:52%;
+    background:color-mix(in srgb, var(--deco) 34%, transparent);
+    -webkit-mask-size:132px 100%;
+    mask-size:132px 100%;
+    -webkit-mask-position:52px bottom;
+    mask-position:52px bottom;
+}
+/* Clouds: one continuous cloud bank — overlapping puffs unioned into a single
+   silhouette, filled with a top-to-bottom gradient for soft volume. */
 .org-scene.scene-cloud{
-    --cc:color-mix(in srgb, var(--deco) 22%, transparent);
-    background-repeat:no-repeat;
-    background-image:
-        radial-gradient(circle at 20% 95%, var(--cc) 0 14px, transparent 16px),
-        radial-gradient(circle at 34% 86%, var(--cc) 0 18px, transparent 20px),
-        radial-gradient(circle at 52% 96%, var(--cc) 0 16px, transparent 18px),
-        radial-gradient(circle at 70% 88%, var(--cc) 0 20px, transparent 22px),
-        radial-gradient(circle at 86% 95%, var(--cc) 0 14px, transparent 16px);
+    background:linear-gradient(to bottom,
+        color-mix(in srgb, var(--deco) 12%, transparent),
+        color-mix(in srgb, var(--deco) 30%, transparent));
+    -webkit-mask-repeat:no-repeat;
+    mask-repeat:no-repeat;
+    -webkit-mask-position:bottom;
+    mask-position:bottom;
+    -webkit-mask-size:100% 100%;
+    mask-size:100% 100%;
+    -webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 90' preserveAspectRatio='none'><g fill='white'><rect x='0' y='60' width='220' height='30'/><circle cx='24' cy='64' r='20'/><circle cx='58' cy='50' r='28'/><circle cx='98' cy='58' r='24'/><circle cx='138' cy='44' r='32'/><circle cx='178' cy='52' r='27'/><circle cx='208' cy='62' r='20'/></g></svg>");
+    mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 90' preserveAspectRatio='none'><g fill='white'><rect x='0' y='60' width='220' height='30'/><circle cx='24' cy='64' r='20'/><circle cx='58' cy='50' r='28'/><circle cx='98' cy='58' r='24'/><circle cx='138' cy='44' r='32'/><circle cx='178' cy='52' r='27'/><circle cx='208' cy='62' r='20'/></g></svg>");
 }
-/* Wind: a few thin streaks at staggered lengths and heights suggest gusts. */
+/* Wind: flowing gust lines that sweep in from the left and curl at their tips. */
 .org-scene.scene-wind{
-    --wd:color-mix(in srgb, var(--deco) 34%, transparent);
-    background-repeat:no-repeat;
-    background-image:
-        linear-gradient(var(--wd), var(--wd)),
-        linear-gradient(var(--wd), var(--wd)),
-        linear-gradient(var(--wd), var(--wd));
-    background-size:60% 2px, 44% 2px, 52% 2px;
-    background-position:14% 40%, 34% 62%, 20% 82%;
+    background:color-mix(in srgb, var(--deco) 34%, transparent);
+    -webkit-mask-repeat:no-repeat;
+    mask-repeat:no-repeat;
+    -webkit-mask-position:center;
+    mask-position:center;
+    -webkit-mask-size:100% 100%;
+    mask-size:100% 100%;
+    -webkit-mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 90' preserveAspectRatio='none' fill='none' stroke='white' stroke-width='6' stroke-linecap='round'><path d='M8 30 C80 26 120 24 150 30 A15 15 0 1 0 135 45'/><path d='M8 58 C90 54 140 54 170 58 A12 12 0 1 1 158 70'/><path d='M8 76 C60 74 96 74 118 76 A10 10 0 1 0 108 86'/></svg>");
+    mask-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 90' preserveAspectRatio='none' fill='none' stroke='white' stroke-width='6' stroke-linecap='round'><path d='M8 30 C80 26 120 24 150 30 A15 15 0 1 0 135 45'/><path d='M8 58 C90 54 140 54 170 58 A12 12 0 1 1 158 70'/><path d='M8 76 C60 74 96 74 118 76 A10 10 0 1 0 108 86'/></svg>");
 }
 
 /* Actions live in a bordered box pinned bottom-right, walled off from the card's
@@ -2009,6 +2036,151 @@ input.drop-target{
     font-size:16px;
     color:#374151;
 }
+
+/* ----- Workshop hub (card menu) + sub-screens ----- */
+.ws-hub[hidden], .ws-screen[hidden]{ display:none; }
+.ws-hub-cards{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+    gap:16px;
+    margin-top:8px;
+}
+.ws-card{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:8px;
+    text-align:left;
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    padding:20px;
+    background:#fff;
+    cursor:pointer;
+    transition:box-shadow .15s, transform .15s, border-color .15s;
+}
+.ws-card:hover{
+    border-color:#c7d2fe;
+    box-shadow:0 6px 18px rgba(59,130,246,.12);
+    transform:translateY(-2px);
+}
+.ws-card-icon{ font-size:30px; line-height:1; }
+.ws-card-title{ font-size:16px; font-weight:600; color:#1f2937; }
+.ws-card-desc{ font-size:13px; color:#6b7280; }
+
+.ws-screen{
+    display:flex;
+    flex-direction:column;
+    flex:1;
+    min-height:0;
+}
+.ws-screen-bar{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:16px;
+}
+.ws-screen-title{ margin:0; font-size:16px; color:#374151; }
+.ws-back{
+    padding:7px 14px;
+    border:1px solid #d1d5db;
+    border-radius:8px;
+    background:#f9fafb;
+    color:#374151;
+    font-size:13px;
+    cursor:pointer;
+}
+.ws-back:hover{ background:#eef2ff; border-color:#c7d2fe; }
+
+/* ----- Calendar screen ----- */
+.cal-layout{
+    display:flex;
+    flex-direction:column;
+    flex:1;
+    min-height:0;
+    gap:16px;
+}
+.cal-grid-wrap{ flex:1 1 60%; min-height:0; overflow:auto; }
+.cal-navbar{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    margin-bottom:12px;
+}
+.cal-month-label{ font-size:16px; font-weight:600; color:#1f2937; min-width:170px; text-align:center; }
+.cal-grid{
+    display:grid;
+    grid-template-columns:repeat(7, 1fr);
+    gap:6px;
+}
+.cal-weekday{
+    text-align:center;
+    font-size:12px;
+    font-weight:600;
+    color:#6b7280;
+    padding:4px 0;
+}
+.cal-day{
+    min-height:74px;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    padding:5px 6px;
+    background:#fff;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.cal-day-blank{ border:none; background:transparent; }
+.cal-day-num{ font-size:12px; color:#9ca3af; font-weight:600; }
+.cal-day-today{ border-color:#3b82f6; box-shadow:inset 0 0 0 1px #3b82f6; }
+.cal-day-today .cal-day-num{ color:#2563eb; }
+.cal-day-past{ background:#f9fafb; opacity:.7; }
+.cal-day-drop{ border-color:#22c55e; background:#f0fdf4; box-shadow:inset 0 0 0 2px #22c55e; }
+.cal-day-pins{ display:flex; flex-direction:column; gap:3px; }
+.cal-pin-chip{
+    font-size:11px;
+    background:#eef2ff;
+    color:#3730a3;
+    border:1px solid #c7d2fe;
+    border-radius:6px;
+    padding:2px 5px;
+    cursor:pointer;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.cal-pin-chip:hover{ background:#e0e7ff; }
+.cal-pin-done{ background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
+.cal-pin-name{ display:block; overflow:hidden; text-overflow:ellipsis; }
+
+.cal-workspace{
+    flex:0 0 auto;
+    max-height:38%;
+    overflow:auto;
+    border-top:1px solid #e5e7eb;
+    padding-top:12px;
+}
+.cal-ws-title{ margin:0 0 8px; font-size:14px; color:#374151; }
+.cal-ws-empty{ font-size:13px; color:#6b7280; margin:0 0 10px; }
+.cal-ws-hint{ font-size:12px; color:#9ca3af; margin:0 0 8px; }
+.cal-ws-files{ display:flex; flex-wrap:wrap; gap:8px; }
+.cal-ws-file{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    padding:6px 10px;
+    background:#fff;
+    cursor:grab;
+    font-size:13px;
+}
+.cal-ws-file:hover{ border-color:#c7d2fe; }
+.cal-ws-file.dragging{ opacity:.5; }
+.cal-ws-file-icon{ font-size:15px; }
+.cal-ws-file-name{ color:#374151; }
+.cal-ws-file-org{ font-size:11px; color:#6b7280; background:#f3f4f6; border-radius:5px; padding:1px 6px; }
+.cal-pin-summary{ font-size:13px; color:#374151; margin:0 0 12px; }
 .vault-note{
     margin:0 0 12px;
     font-size:13px;
