@@ -321,5 +321,66 @@ class CleanupWorkspaceTests(unittest.TestCase):
         self.assertTrue((folder / "sub" / "inner.png").exists())
 
 
+class BringLastWorkspaceTests(unittest.TestCase):
+    """workspace_ops.bring_last_workspace_to_today: rename the newest past dated
+    folder to today so it becomes today's workspace."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = Path(self._tmp) / "workspace"
+        self._today = datetime.now().strftime("%Y-%m-%d")
+
+    def tearDown(self):
+        config.WORKSPACE_DIR = self._orig
+
+    def _make(self, name, *files):
+        folder = config.WORKSPACE_DIR / name
+        folder.mkdir(parents=True)
+        for f in files:
+            (folder / f).write_text(f)
+        return folder
+
+    def test_renames_previous_folder_and_moves_contents(self):
+        self._make("2020-01-02", "carried.txt")
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["source"], "2020-01-02")
+        today_path = config.WORKSPACE_DIR / self._today
+        self.assertTrue((today_path / "carried.txt").exists())
+        self.assertFalse((config.WORKSPACE_DIR / "2020-01-02").exists())
+
+    def test_picks_the_newest_of_several(self):
+        self._make("2019-05-01")
+        self._make("2021-11-30", "newest.txt")
+        self._make("2020-07-15")
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["source"], "2021-11-30")
+        self.assertTrue((config.WORKSPACE_DIR / self._today / "newest.txt").exists())
+
+    def test_refuses_when_today_already_exists(self):
+        self._make(self._today)
+        self._make("2020-01-02", "carried.txt")
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertFalse(result["ok"])
+        self.assertIn("already exists", result["error"])
+        self.assertTrue((config.WORKSPACE_DIR / "2020-01-02").exists())  # untouched
+
+    def test_errors_when_no_candidate(self):
+        config.WORKSPACE_DIR.mkdir(parents=True)
+        # Only the limbo sibling and a non-date folder — neither is a candidate.
+        (config.WORKSPACE_DIR / config.WORKSPACE_LIMBO_DIRNAME).mkdir()
+        (config.WORKSPACE_DIR / "notes").mkdir()
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertFalse(result["ok"])
+        self.assertIn("No previous workspace", result["error"])
+
+    def test_missing_workspace_dir_is_an_error_not_a_crash(self):
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertFalse(result["ok"])
+        self.assertIn("error", result)
+
+
 if __name__ == "__main__":
     unittest.main()

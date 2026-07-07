@@ -205,6 +205,46 @@ def cleanup_workspace():
     return str(folder), deleted, kept
 
 
+def bring_last_workspace_to_today():
+    """Rename the most recent **past** dated workspace folder to today's date.
+
+    Finds the newest ``YYYY-MM-DD`` folder under ``config.WORKSPACE_DIR`` that isn't
+    today (the limbo sibling and any non-date-named folders are ignored) and
+    ``os.replace``s it to today's dated folder, so it is treated as today's
+    workspace. The folder's sidecar manifest travels with it unchanged.
+
+    Non-destructive: refuses when today's folder already **exists** (so nothing is
+    clobbered — the Workbench button is disabled in that case anyway) and reports
+    when there is no earlier folder to carry forward. Returns a small result dict
+    ``{"ok": bool, "folder"/"source"/"error": ...}``.
+    """
+    if not config.WORKSPACE_DIR.is_dir():
+        return {"ok": False, "error": "No previous workspace to bring forward."}
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_path = config.WORKSPACE_DIR / today
+    if today_path.exists():
+        return {"ok": False, "error": "Today's workspace already exists."}
+
+    candidates = []
+    for entry in config.WORKSPACE_DIR.iterdir():
+        if not entry.is_dir() or entry.name == config.WORKSPACE_LIMBO_DIRNAME:
+            continue
+        try:
+            datetime.strptime(entry.name, "%Y-%m-%d")
+        except ValueError:
+            continue  # not a dated workspace folder
+        if entry.name != today:
+            candidates.append(entry)
+    if not candidates:
+        return {"ok": False, "error": "No previous workspace to bring forward."}
+
+    # Names are YYYY-MM-DD, so lexicographic max == the most recent date.
+    latest = max(candidates, key=lambda p: p.name)
+    os.replace(latest, today_path)
+    log.info("Brought workspace %s forward to today (%s)", latest.name, today)
+    return {"ok": True, "folder": str(today_path), "source": latest.name}
+
+
 def person_text(name, email):
     """Format one person as their display **name** by default.
 

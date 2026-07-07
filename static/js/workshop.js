@@ -27,9 +27,11 @@ function showWorkshopScreen(name){
     const hub = document.getElementById("workshopHub");
     const vault = document.getElementById("workshopVault");
     const cal = document.getElementById("workshopCalendar");
+    const wb = document.getElementById("workshopWorkbench");
     if(hub) hub.hidden = name !== "hub";
     if(vault) vault.hidden = name !== "vault";
     if(cal) cal.hidden = name !== "calendar";
+    if(wb) wb.hidden = name !== "workbench";
 }
 
 function openWorkshopVault(){

@@ -135,13 +135,17 @@ def _links(mail, main_terms, optional_terms, blacklist):
     return out
 
 
-def extra_link_views(urls, main_node, optional_node, existing_urls=()):
+def extra_link_views(urls, main_node, optional_node, existing_urls=(), blacklist=None):
     """Build ``{url, url_html}`` views for extra links grafted onto a mail.
 
     Used by the Brute Force Mail Deduplication transform (``routes.api_mail``) to
     append a notification's link(s) to its twin's view model. Skips any URL already
     present (``existing_urls``) and de-duplicates within ``urls``; keeps the escaping
     here so the presenter stays the sole place stored mail becomes HTML.
+
+    ``blacklist`` (a parsed Links-blacklist node, or ``None``) drops any grafted URL
+    it matches — the same rule :func:`_links` applies to a mail's own links — so a
+    blacklisted link stays hidden even when it arrives via a grafted notification.
     """
     main_terms = expr.operands(main_node)
     optional_terms = expr.operands(optional_node)
@@ -151,6 +155,8 @@ def extra_link_views(urls, main_node, optional_node, existing_urls=()):
         if url in seen:
             continue
         seen.add(url)
+        if blacklist is not None and expr.evaluate(blacklist, url.lower()):
+            continue
         out.append(_link_view(url, main_terms, optional_terms))
     return out
 

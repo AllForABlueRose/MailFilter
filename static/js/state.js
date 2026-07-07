@@ -59,8 +59,13 @@ let unlockKeySearch = "";        // key-explorer search query
 let unlockFileSearch = "";       // file-explorer search query
 
 // Workshop hub navigation + Key Vault reveal gateway.
-let workshopScreen = 'hub';      // 'hub' | 'vault' | 'calendar' (the visible Workshop sub-screen)
+let workshopScreen = 'hub';      // 'hub' | 'vault' | 'calendar' | 'workbench' (the visible Workshop sub-screen)
 let vaultKeysRevealed = false;   // on the vault screen, has the user pressed "View keys" after unlocking?
+
+// Workshop → Workbench Processing (read-only today's workspace files + "Bring Last Workspace to Today").
+let workbenchFiles = [];         // today's workspace files (from /api/workspace/files)
+let workbenchExists = false;     // whether today's workspace folder exists
+let workbenchOrgMeta = {};       // org_id -> {name, color} from /api/organizations (colours + labels)
 
 // Workshop → Calendar (file pins onto days).
 let calendarYear = 0;            // year of the month currently shown (0 until first render)

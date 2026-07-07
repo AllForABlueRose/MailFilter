@@ -183,7 +183,7 @@ ORG_CARD_INKS = ("white", "black")
 # which corner. `card_banner` runs an accent strip along the bottom, right, or
 # both edges. `card_scene` fills the card's bottom half with a soft motif. All
 # use the --deco colour (org colour on outline cards, --ink on filled ones).
-ORG_CARD_CORNERS = ("none", "banner", "ribbon", "star")
+ORG_CARD_CORNERS = ("none", "banner", "ribbon", "star", "sun", "moon", "diamond")
 ORG_CARD_CORNER_POSITIONS = ("top-right", "bottom-right")
 ORG_CARD_BANNERS = ("none", "bottom", "right", "both")
 ORG_CARD_SCENES = ("none", "wave", "cloud", "wind")

@@ -33,12 +33,12 @@ function ensureUnlockDom(){
     inner.appendChild(_buildSection("🔑 Keys", "unlockKeyGrid", "unlockKeySearchInput",
         "Search keys…", v => onUnlockKeySearch(v)));
     inner.appendChild(_buildSection("🗂 Today's workspace", "unlockFileGrid", "unlockFileSearchInput",
-        "Search files…", v => { unlockFileSearch = v; renderUnlockFiles(); }));
+        "Search files…", v => { unlockFileSearch = v; renderUnlockFiles(); }, "unlock-file-flow"));
     panel.appendChild(inner);
     root.appendChild(panel);
 }
 
-function _buildSection(title, gridId, searchId, placeholder, onSearch){
+function _buildSection(title, gridId, searchId, placeholder, onSearch, gridClass){
     const sec = el("div", "unlock-sec");
     const head = el("div", "unlock-sec-head");
     head.appendChild(el("span", "unlock-sec-title", title));
@@ -46,7 +46,7 @@ function _buildSection(title, gridId, searchId, placeholder, onSearch){
     search.type = "search"; search.id = searchId; search.placeholder = placeholder;
     search.addEventListener("input", () => onSearch(search.value));
     head.appendChild(search);
-    const grid = el("div", "unlock-grid"); grid.id = gridId;
+    const grid = el("div", "unlock-grid" + (gridClass ? " " + gridClass : "")); grid.id = gridId;
     sec.append(head, grid);
     return sec;
 }

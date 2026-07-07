@@ -13,6 +13,8 @@ it needs so there is no import cycle (``customer_store`` never imports this).
 
 from config import RECEIVED_FORMAT
 
+from . import expr
+
 # Roles a contact/domain can hold within an org. Kept in sync with
 # config.ORG_DOMAIN_ROLES; "member" is normal staff, "representative" is a 3rd
 # party (or someone on a foreign domain) fronting the org. Resolution treats them
@@ -204,31 +206,47 @@ def mail_org_resolver(orgs, mappings=None):
     Hierarchy, first match wins:
 
     1. **Brute Force** keyword — only when ``mappings`` is given (the "Suspected
-       Customers List", ``[{keyword, org_id}, ...]``): the first keyword (in list
-       order) found in the mail's ``subject``/``body`` (case-insensitively) whose
-       ``org_id`` is a live org. A matched keyword mapped to a missing org yields no
-       brute-force hit and falls through to the sender.
+       Customers List", ``[{keyword, org_id}, ...]``): the first mapping (in list
+       order) whose ``keyword`` **expression** matches the mail's ``subject``/``body``
+       (case-insensitively) and whose ``org_id`` is a live org. Each ``keyword`` is a
+       full boolean-search expression parsed by :mod:`mailfilter.expr` — the same
+       grammar the search fields use (``,`` OR, ``;`` AND, ``[[ ]]`` groups,
+       ``<{( regex )}>``) — so one mapping can require several terms. A matched
+       mapping pointing at a missing org yields no brute-force hit and falls through
+       to the sender; a keyword that fails to parse is skipped.
     2. **Representative** — the sender resolves (email override > domain) to an org
        they are a *representative of*.
     3. **Member** — else the sender's base-membership org.
 
     Returns the org dict from ``orgs`` (callers read ``id``/``name``/``display_name``/
-    ``color`` per their need), or ``None``. The maps and cleaned keyword list are
-    built **once** so a whole list resolves without rebuilding them; pass
+    ``color`` per their need), or ``None``. The maps and compiled keyword expressions
+    are built **once** so a whole list resolves without rebuilding them; pass
     ``mappings=None`` (or ``[]``) to disable the brute-force tier — e.g. when its
     experimental feature is off. Pure: no store, no HTML.
     """
     maps = _resolution_maps(orgs)
     orgs_by_id = {o.get("id"): o for o in orgs or []}
-    cleaned = [(str(m.get("keyword") or "").strip().lower(), str(m.get("org_id") or ""))
-               for m in (mappings or [])
-               if str((m or {}).get("keyword") or "").strip()]
+    # Compile each mapping's keyword into a boolean-search node once. A blank keyword
+    # or one that fails to parse (e.g. a bad regex) is dropped — resolution never
+    # raises over a hand-entered mapping.
+    compiled = []
+    for m in (mappings or []):
+        keyword = str((m or {}).get("keyword") or "").strip()
+        if not keyword:
+            continue
+        try:
+            node = expr.parse(keyword)
+        except expr.ExprError:
+            continue
+        if node is None:
+            continue
+        compiled.append((node, str(m.get("org_id") or "")))
 
     def resolve_one(mail):
-        if cleaned:
+        if compiled:
             content = (mail.get("subject", "") + "\n" + mail.get("body", "")).lower()
-            for keyword, org_id in cleaned:
-                if keyword in content:
+            for node, org_id in compiled:
+                if expr.evaluate(node, content):
                     org = orgs_by_id.get(org_id)
                     if org is not None:
                         return org

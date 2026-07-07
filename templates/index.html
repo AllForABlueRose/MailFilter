@@ -411,6 +411,9 @@
           <option value="banner">Corner banner</option>
           <option value="ribbon">Ribbon</option>
           <option value="star">Star</option>
+          <option value="sun">Sun</option>
+          <option value="moon">Moon</option>
+          <option value="diamond">Diamond</option>
         </select>
         <button type="button" id="orgCardCornerPos" class="flip-btn org-corner-pos" data-value="top-right"
                 onclick="toggleOrgCornerPos()" title="Flip which corner the icon sits in">↗ Top-right</button>
@@ -668,11 +671,13 @@
     <div class="modal-body">
       <p class="exp-help">
         Map a <b>keyword</b> to a <b>customer organization</b>. When a mail's content
-        (subject or body) contains the keyword, the mail resolves to that
+        (subject or body) matches the keyword, the mail resolves to that
         organization — used for the download file name/metadata and the exported
         report's customer-organization column. The first matching keyword (top to
-        bottom) wins.
+        bottom) wins. The keyword is a full search expression, so one mapping can
+        need several terms.
       </p>
+      <div class="hint">, = or &nbsp; ; = and &nbsp; [[ ]] = group &nbsp; &lt;{(&nbsp;regex&nbsp;)}&gt;</div>
       <div id="suspectedCustomersRows" class="suspected-rows"></div>
       <button type="button" class="exclude-toggle" onclick="addSuspectedCustomerRow()">+ Add keyword</button>
     </div>
@@ -720,6 +725,12 @@
         <span class="ws-card-desc">Pin a workspace file to a day; when that day
           comes, it arrives in that day's workspace automatically.</span>
       </button>
+      <button type="button" class="ws-card" onclick="openWorkshopWorkbench()">
+        <span class="ws-card-icon">🛠</span>
+        <span class="ws-card-title">Workbench Processing</span>
+        <span class="ws-card-desc">Work with today's downloaded files, or bring a
+          previous day's workspace forward to today.</span>
+      </button>
     </div>
   </div>
 
@@ -751,6 +762,17 @@
       <div id="calendarGrid" class="cal-grid-wrap"></div>
       <div id="calendarWorkspace" class="cal-workspace"></div>
     </div>
+  </div>
+
+  <!-- Workbench Processing screen (workbench.js): read-only view of today's
+       workspace files (same source as the Unlock Station's bottom half) plus the
+       "Bring Last Workspace to Today" action. -->
+  <div id="workshopWorkbench" class="ws-screen" hidden>
+    <div class="ws-screen-bar">
+      <button type="button" class="ws-back" onclick="workshopBack()">← Back</button>
+      <h3 class="ws-screen-title">🛠 Workbench Processing</h3>
+    </div>
+    <div id="workbenchRoot"></div>
   </div>
 </section>
 
@@ -839,6 +861,7 @@
 <script src="{{ url_for('static', filename='js/workshop.js') }}"></script>
 <script src="{{ url_for('static', filename='js/unlockstation.js') }}"></script>
 <script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workbench.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

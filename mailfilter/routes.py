@@ -313,7 +313,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             urls = twin_links.get(m["id"])
             if urls:
                 view["links"] = view["links"] + extra_link_views(
-                    urls, query.main, query.optional, [l["url"] for l in view["links"]])
+                    urls, query.main, query.optional, [l["url"] for l in view["links"]],
+                    blacklist=query.links_blacklist)
             out.append(view)
         return jsonify({"mails": out, "query_error": "", **status})
 
@@ -431,6 +432,18 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         """
         folder, deleted, kept = workspace_ops.cleanup_workspace()
         return jsonify({"folder": folder, "deleted": deleted, "kept_count": len(kept)})
+
+    @bp.post("/api/workspace/bring-last")
+    def api_workspace_bring_last():
+        """Rename the most recent past dated workspace folder to today's date.
+
+        No body. Used by Workbench Processing's "Bring Last Workspace to Today":
+        turns the latest earlier ``YYYY-MM-DD`` folder into today's workspace. No
+        secrets, so no vault gate. Returns ``{ok, folder/source/error}``; **409**
+        when today's folder already exists or there is nothing to carry forward.
+        """
+        result = workspace_ops.bring_last_workspace_to_today()
+        return jsonify(result), (200 if result.get("ok") else 409)
 
     # ----- Unlock Station (Key Vault ⇄ workspace files) -----
 

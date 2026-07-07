@@ -164,7 +164,8 @@ function addSuspectedCustomerRow(keyword, orgId){
     const kw = document.createElement('input');
     kw.type = 'text';
     kw.className = 'suspected-keyword';
-    kw.placeholder = 'keyword in mail content';
+    kw.placeholder = 'keyword — e.g. acme; [[invoice, receipt]]';
+    kw.title = 'Operators:  , = OR    ; = AND    [[ ]] = group    <{( regex )}>';
     kw.value = keyword || '';
 
     const arrow = document.createElement('span');

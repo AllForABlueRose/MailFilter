@@ -1205,20 +1205,55 @@ input.drop-target{
 .org-corner.corner-ribbon.pos-top-right::before{ transform:rotate(45deg); }
 .org-corner.corner-ribbon.pos-bottom-right::before{ transform:rotate(-45deg); }
 
-/* Star: a five-point star badge, clipped from a --deco square. */
-.org-corner.corner-star{
+/* Centered badge motifs (star / sun / moon / diamond): a shape carved from a
+   --deco square, centered in the corner box. Unlike the banner/ribbon (which hug
+   the corner), these are pulled one row inward from a top-right corner so the
+   optional category label doesn't cover them — and the bottom-right variant is
+   raised one row to match. */
+.org-corner.corner-star,
+.org-corner.corner-sun,
+.org-corner.corner-moon,
+.org-corner.corner-diamond{
     display:flex;
     align-items:center;
     justify-content:center;
 }
-.org-corner.corner-star::before{
+.org-corner.corner-star.pos-top-right,
+.org-corner.corner-sun.pos-top-right,
+.org-corner.corner-moon.pos-top-right,
+.org-corner.corner-diamond.pos-top-right{ top:30px; }
+.org-corner.corner-star.pos-bottom-right,
+.org-corner.corner-sun.pos-bottom-right,
+.org-corner.corner-moon.pos-bottom-right,
+.org-corner.corner-diamond.pos-bottom-right{ bottom:30px; }
+.org-corner.corner-star::before,
+.org-corner.corner-sun::before,
+.org-corner.corner-moon::before,
+.org-corner.corner-diamond::before{
     content:"";
     width:22px;
     height:22px;
     background:var(--deco);
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));
+}
+.org-corner.corner-star::before{
     clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
         50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
-    filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));
+}
+/* Diamond: a rhombus (rotated square) carved from the --deco square. */
+.org-corner.corner-diamond::before{
+    clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+/* Sun: a disc with eight rays, and Moon: a crescent — both masked from --deco so
+   the fill still tracks each card's decoration colour (prefixed + standard for
+   Safari/older-Chromium coverage). */
+.org-corner.corner-sun::before{
+    -webkit-mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='5' fill='white'/><g stroke='white' stroke-width='2' stroke-linecap='round'><line x1='12' y1='1' x2='12' y2='4'/><line x1='12' y1='20' x2='12' y2='23'/><line x1='1' y1='12' x2='4' y2='12'/><line x1='20' y1='12' x2='23' y2='12'/><line x1='4' y1='4' x2='6' y2='6'/><line x1='18' y1='18' x2='20' y2='20'/><line x1='4' y1='20' x2='6' y2='18'/><line x1='18' y1='6' x2='20' y2='4'/></g></svg>") center/contain no-repeat;
+    mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='5' fill='white'/><g stroke='white' stroke-width='2' stroke-linecap='round'><line x1='12' y1='1' x2='12' y2='4'/><line x1='12' y1='20' x2='12' y2='23'/><line x1='1' y1='12' x2='4' y2='12'/><line x1='20' y1='12' x2='23' y2='12'/><line x1='4' y1='4' x2='6' y2='6'/><line x1='18' y1='18' x2='20' y2='20'/><line x1='4' y1='20' x2='6' y2='18'/><line x1='18' y1='6' x2='20' y2='4'/></g></svg>") center/contain no-repeat;
+}
+.org-corner.corner-moon::before{
+    -webkit-mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 3 A9 9 0 1 0 16 21 A7 7 0 1 1 16 3 Z' fill='white'/></svg>") center/contain no-repeat;
+    mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 3 A9 9 0 1 0 16 21 A7 7 0 1 1 16 3 Z' fill='white'/></svg>") center/contain no-repeat;
 }
 
 /* Bottom-half scenes: a soft motif band across the card's lower half. Kept faint
@@ -2432,7 +2467,10 @@ input.drop-target{
     border-radius:8px; font-size:13px; width:220px; max-width:50%;
 }
 .unlock-grid{ overflow:auto; padding:4px 14px 14px; }
-#unlockFileGrid{ display:block; }
+/* Files view: org panels shrink to fit their tiles and flow side-by-side (wrapping),
+   like a standard file explorer — instead of each org panel being a full-width row. */
+.unlock-file-flow{ display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; }
+.unlock-file-flow .unlock-file-group{ margin-bottom:0; max-width:100%; }
 .unlock-empty{ color:#6b7280; font-size:13px; padding:8px 2px; }
 
 /* One continuous org-tinted panel per organization; individual tiles sit on it as
@@ -2483,6 +2521,11 @@ input.drop-target{
     background:color-mix(in srgb, var(--org-color,#9ca3af) 22%, #fff);
 }
 .unlock-file-ext{ font-size:11px; color:#9ca3af; font-style:italic; }
+
+/* Workbench Processing screen: toolbar (Bring Last Workspace to Today) + file grid. */
+.wb-bar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:4px 14px 10px; }
+.wb-bring-btn:disabled{ opacity:.5; cursor:not-allowed; }
+.wb-status{ font-size:13px; color:#374151; }
 .unlock-assigned{ display:flex; align-items:center; gap:4px; margin-top:6px; }
 .unlock-assigned-key{
     font-size:11px; color:#065f46; background:#d1fae5; padding:1px 6px; border-radius:999px;

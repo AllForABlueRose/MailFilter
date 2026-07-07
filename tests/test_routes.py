@@ -312,6 +312,45 @@ class RouteTests(unittest.TestCase):
         finally:
             config.WORKSPACE_DIR = orig
 
+    def test_workspace_bring_last_renames_previous_folder_to_today(self):
+        from datetime import datetime
+        out = Path(self._tmpdir) / "wbring"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            (out / "2020-01-02").mkdir(parents=True)
+            (out / "2020-01-02" / "carried.txt").write_text("older workspace")
+
+            resp = self.client.post("/api/workspace/bring-last")
+            data = resp.get_json()
+            self.assertEqual(resp.status_code, 200)
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["source"], "2020-01-02")
+            self.assertTrue((out / today / "carried.txt").exists())
+            self.assertFalse((out / "2020-01-02").exists())
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_workspace_bring_last_409_when_today_exists(self):
+        from datetime import datetime
+        out = Path(self._tmpdir) / "wbring2"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            (out / today).mkdir(parents=True)
+            (out / "2020-01-02").mkdir(parents=True)
+
+            resp = self.client.post("/api/workspace/bring-last")
+            data = resp.get_json()
+            self.assertEqual(resp.status_code, 409)
+            self.assertFalse(data["ok"])
+            self.assertIn("error", data)
+            self.assertTrue((out / "2020-01-02").exists())  # untouched
+        finally:
+            config.WORKSPACE_DIR = orig
+
     def test_mail_dedupe_hides_notification_and_grafts_link(self):
         self.store.add_mails([
             make_mail(id="ORIG", subject="Server error report", body="Disk full on node 3",
@@ -333,6 +372,23 @@ class RouteTests(unittest.TestCase):
                       [l["url"] for l in by_id["ORIG"]["links"]])
         # The processed twin carries the 🧬 "deduped" tag on the same response.
         self.assertEqual(by_id["ORIG"]["tags"].get("deduped"), "recent")
+
+    def test_mail_dedupe_grafted_link_respects_links_blacklist(self):
+        self.store.add_mails([
+            make_mail(id="ORIGB", subject="Server error report", body="Disk full on node 3",
+                      received="2026-06-10 09:30:00"),
+            make_mail(id="NOTEB", subject="New ticket created", received="2026-06-10 09:40:00",
+                      body="Ticket opened.\nSubject: Server error report\n"
+                           "Body: Disk full on node 3\nSee https://zendesk.example/tickets/42"),
+        ])
+        # With the notification's link on the Links blacklist, the grafted link is
+        # hidden on the twin (same rule as a mail's own links).
+        on = self.client.get(
+            "/api/mail?dedupe=1&dedupe_subject=New ticket created&links_blacklist=zendesk"
+        ).get_json()["mails"]
+        by_id = {m["id"]: m for m in on}
+        self.assertNotIn("NOTEB", by_id)
+        self.assertEqual(by_id["ORIGB"]["links"], [])
 
     def test_mail_dedupe_tag_persists_and_records_once(self):
         self.store.add_mails([

@@ -284,6 +284,39 @@ class MailOrgResolverTests(unittest.TestCase):
         self.assertEqual(customers.org_label(org), {"name": "Acme", "color": "#222222"})  # pill
         self.assertEqual(org["name"], "Acme Corp")  # download/CSV use the real name
 
+    def test_keyword_and_operator_requires_both_terms(self):
+        # ';' is AND: the mapping matches only when both terms appear in content.
+        mappings = [{"keyword": "globex; invoice", "org_id": "glo"}]
+        r = customers.mail_org_resolver(self.orgs, mappings)
+        self.assertEqual(r(self._mail(sender_email="x@nobody.com",
+                                      subject="Globex invoice #3", body=""))["id"], "glo")
+        self.assertIsNone(r(self._mail(sender_email="x@nobody.com",
+                                       subject="Globex ticket", body="")))
+
+    def test_keyword_or_and_grouping(self):
+        # 'a; [[b, c]]' == a AND (b OR c).
+        mappings = [{"keyword": "globex; [[invoice, receipt]]", "org_id": "glo"}]
+        r = customers.mail_org_resolver(self.orgs, mappings)
+        self.assertEqual(r(self._mail(sender_email="x@nobody.com",
+                                      body="globex receipt attached"))["id"], "glo")
+        self.assertIsNone(r(self._mail(sender_email="x@nobody.com",
+                                       body="globex statement attached")))
+
+    def test_keyword_regex_term(self):
+        mappings = [{"keyword": "<{(ticket-\\d+)}>", "org_id": "glo"}]
+        r = customers.mail_org_resolver(self.orgs, mappings)
+        self.assertEqual(r(self._mail(sender_email="x@nobody.com",
+                                      subject="ref ticket-4821", body=""))["id"], "glo")
+        self.assertIsNone(r(self._mail(sender_email="x@nobody.com",
+                                       subject="ref ticket-none", body="")))
+
+    def test_unparseable_keyword_is_skipped(self):
+        # A bad regex must not raise; the mapping is dropped and the sender resolves.
+        mappings = [{"keyword": "<{( ( )}>", "org_id": "glo"}]
+        org = customers.resolve_mail_org(
+            self._mail(sender_email="bob@acme.com", body="x"), self.orgs, mappings)
+        self.assertEqual(org["id"], "acme")  # fell through to sender rep
+
 
 if __name__ == "__main__":
     unittest.main()

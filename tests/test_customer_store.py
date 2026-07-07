@@ -99,6 +99,12 @@ class CoerceTests(unittest.TestCase):
              bad["card_banner"], bad["card_scene"]),
             ("white", "none", "top-right", "none", "none"))
 
+    def test_card_corner_accepts_new_icons(self):
+        store = _store()
+        for corner in ("sun", "moon", "diamond"):
+            org = store.create({"name": corner, "card_corner": corner})
+            self.assertEqual(org["card_corner"], corner)
+
     def test_card_decoration_fields_preserved_on_update_when_omitted(self):
         store = _store()
         org = store.create({"name": "A", "card_ink": "black", "card_scene": "cloud"})

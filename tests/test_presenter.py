@@ -172,5 +172,25 @@ class PreviewCapTests(unittest.TestCase):
                          config.PREVIEW_CHARS)
 
 
+class ExtraLinkViewsTests(unittest.TestCase):
+    """extra_link_views: the Brute Force Mail Deduplication link graft."""
+
+    def test_skips_existing_and_dedups(self):
+        from mailfilter.presenter import extra_link_views
+        out = extra_link_views(
+            ["https://a.com/1", "https://a.com/1", "https://b.com/2"],
+            None, None, existing_urls=["https://a.com/1"])
+        self.assertEqual([v["url"] for v in out], ["https://b.com/2"])
+
+    def test_grafted_links_respect_blacklist(self):
+        from mailfilter.presenter import extra_link_views
+        # A blacklisted grafted URL is dropped, just like a mail's own links.
+        blacklist = _node("tracking")
+        out = extra_link_views(
+            ["https://ok.com/x", "https://tracking.example/hit"],
+            None, None, blacklist=blacklist)
+        self.assertEqual([v["url"] for v in out], ["https://ok.com/x"])
+
+
 if __name__ == "__main__":
     unittest.main()
