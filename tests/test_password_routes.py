@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
-from mailfilter import create_app
+from mailfilter import create_app, vault_crypto
 from tests.factories import make_mail
 
 _ISOLATED = (
@@ -120,6 +120,56 @@ class PasswordRouteTests(unittest.TestCase):
         ]})
         scan = self.client.post("/api/passwords/scan").get_json()
         self.assertEqual([e["component"] for e in scan["pattern_errors"]], [2])
+
+
+@unittest.skipUnless(vault_crypto.is_available(), "cryptography not installed")
+class PasswordCaptureOrgTests(unittest.TestCase):
+    """Req 1: a captured key is filed under the mail's resolved org — including the
+    Brute Force keyword tier when `resolve_customer_name` is on — not sender-only."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        names = _ISOLATED + ("CUSTOMER_MATCH_FILE",)
+        self._orig = {n: getattr(config, n) for n in names}
+        for n in names:
+            setattr(config, n, Path(self._tmpdir) / n.lower())
+        self.app = create_app()
+        self.app.extensions["experimental_store"].update({"passwords": True})
+        self.store = self.app.extensions["mail_store"]
+        self.client = self.app.test_client()
+        # Sender resolves to no org; the body carries a Brute Force keyword + a password.
+        self.store.add_mails([
+            make_mail(id="P", subject="Project Orion update", received=_recent(1),
+                      attachments=[], sender_email="stranger@nowhere.test",
+                      body="Hello,\nPassword:\n Hunter2xZ\nRegards"),
+        ])
+        self.org = self.client.post("/api/organizations",
+                                    json={"name": "Orion Inc"}).get_json()
+        self.app.extensions["customer_match_store"].update({"customers": [
+            {"keyword": "orion", "org_id": self.org["id"]}]})
+        self.client.post("/api/vault/init", json={"passphrase": "passphrase1"})
+
+    def tearDown(self):
+        for name, value in self._orig.items():
+            setattr(config, name, value)
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _entries_by_org(self):
+        return self.client.get("/api/vault/entries").get_json().get("entries", {})
+
+    def test_capture_uses_brute_force_org_when_enabled(self):
+        self.app.extensions["experimental_store"].update({"resolve_customer_name": True})
+        self.client.post("/api/passwords/scan")
+        entries = self._entries_by_org()
+        self.assertIn(self.org["id"], entries)
+        self.assertEqual(len(entries[self.org["id"]]), 1)
+
+    def test_capture_unassigned_when_brute_force_disabled(self):
+        # Flag off -> keyword ignored -> unresolved sender -> Unassigned bucket.
+        self.client.post("/api/passwords/scan")
+        entries = self._entries_by_org()
+        self.assertNotIn(self.org["id"], entries)
+        self.assertIn(config.VAULT_UNASSIGNED_ORG_ID, entries)
 
 
 if __name__ == "__main__":

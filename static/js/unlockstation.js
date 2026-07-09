@@ -31,7 +31,7 @@ function ensureUnlockDom(){
     const panel = el("div", "unlock-panel"); panel.id = "unlockPanel"; panel.hidden = true;
     const inner = el("div", "unlock-panel-inner");
     inner.appendChild(_buildSection("🔑 Keys", "unlockKeyGrid", "unlockKeySearchInput",
-        "Search keys…", v => onUnlockKeySearch(v)));
+        "Search keys…", v => onUnlockKeySearch(v), "unlock-file-flow"));
     inner.appendChild(_buildSection("🗂 Today's workspace", "unlockFileGrid", "unlockFileSearchInput",
         "Search files…", v => { unlockFileSearch = v; renderUnlockFiles(); }, "unlock-file-flow"));
     panel.appendChild(inner);
@@ -344,9 +344,12 @@ function handleUnlockResult(res){
     if(res.status === 404){ setUnlockStatus(data.error || "No workspace folder for today."); return; }
     const ok = data.unlocked || [];
     const errs = data.errors || [];
-    // Only key-bearing unlocks are worth recording as a per-org pattern.
+    // Only key-bearing unlocks are worth recording as a per-org pattern. Capture the
+    // entry_id each file used (from the drag map, still populated for a manual unlock)
+    // so doRecord can detect one managed key spanning multiple file kinds.
     unlockLastUnlocked = ok.filter(u => u.org_id && u.key_kind)
-        .map(u => ({org_id: u.org_id, file_kind: u.file_kind, key_kind: u.key_kind}));
+        .map(u => ({org_id: u.org_id, file_kind: u.file_kind, key_kind: u.key_kind,
+                    entry_id: unlockAssignments[u.name] || null}));
     unlockAssignments = {};
     _unlockSecretCache = {};
     let msg = ok.length + " file(s) unlocked";
@@ -358,13 +361,32 @@ function handleUnlockResult(res){
 }
 
 async function doRecord(){
-    const records = unlockLastUnlocked.map(u => ({
-        org_id: u.org_id, file_kind: u.file_kind, key_kind: u.key_kind,
-    }));
-    if(!records.length){ setUnlockStatus("Nothing to record."); return; }
-    const res = await vaultApi("/api/workspace/record-assignment", "POST", {records});
+    // Default: record a per-kind habit per unlock. But if one org used a single
+    // managed key across >=2 distinct file kinds, record the cross-kind "same key for
+    // all files" habit for that org instead (and omit its per-kind records).
+    const byOrg = {};
+    unlockLastUnlocked.forEach(u => { (byOrg[u.org_id] || (byOrg[u.org_id] = [])).push(u); });
+    const records = [], allFiles = [];
+    Object.keys(byOrg).forEach(orgId => {
+        const items = byOrg[orgId];
+        const kindsByEntry = {};
+        items.filter(u => u.key_kind === "managed" && u.entry_id).forEach(u => {
+            (kindsByEntry[u.entry_id] || (kindsByEntry[u.entry_id] = new Set())).add(u.file_kind);
+        });
+        const spansKinds = Object.keys(kindsByEntry).some(id => kindsByEntry[id].size >= 2);
+        if(spansKinds){
+            allFiles.push(orgId);
+        } else {
+            items.forEach(u => records.push(
+                {org_id: u.org_id, file_kind: u.file_kind, key_kind: u.key_kind}));
+        }
+    });
+    if(!records.length && !allFiles.length){ setUnlockStatus("Nothing to record."); return; }
+    const res = await vaultApi("/api/workspace/record-assignment", "POST",
+        {records, all_files: allFiles});
     if(res.ok){
-        setUnlockStatus("Recorded key-assignment pattern for " + records.length + " unlock(s).");
+        setUnlockStatus("Recorded key-assignment pattern for "
+            + (records.length + allFiles.length) + " unlock(s).");
         unlockLastUnlocked = [];
         updateUnlockActions();
     } else {

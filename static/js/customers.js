@@ -203,7 +203,7 @@ function createOrgCard(o, counts){
 
     // Read-only recorded key-assignment habits (Unlock Station "Record Customer
     // Key Assignment"). Fixed text, never editable.
-    const kaBox = buildKeyAssignmentBox(o.key_assignments);
+    const kaBox = buildKeyAssignmentBox(o.key_assignments, o.all_files_key);
     if(kaBox) card.appendChild(kaBox);
 
     const c = counts || {member: 0, representative: 0};
@@ -263,9 +263,10 @@ function buildVaultInfoBox(vault){
 // given file kind for this org, so "Smart Key Assignment and Unlock" can replay it.
 const KA_FILE_LABELS = {zip: "Zip files", excel: "Excel files"};
 const KA_SELECTOR_LABELS = {managed: "managed key", recent_temporary: "most recent temporary key"};
-function buildKeyAssignmentBox(assignments){
+function buildKeyAssignmentBox(assignments, allFilesKey){
     assignments = assignments || [];
-    if(!assignments.length) return null;
+    const hasAllFiles = !!(allFilesKey && allFilesKey.selector);
+    if(!assignments.length && !hasAllFiles) return null;
     const box = document.createElement("div");
     box.className = "org-vault-info org-keyassign-info";
     box.title = "Recorded by the Unlock Station; replayed by Smart Key Assignment";
@@ -273,6 +274,10 @@ function buildKeyAssignmentBox(assignments){
     lead.className = "org-vault-lead";
     lead.textContent = "🗝 Key assignment habits";
     box.appendChild(lead);
+    // The cross-kind habit takes precedence at replay time, so surface it first.
+    if(hasAllFiles){
+        box.appendChild(makeVaultLine("All files: same managed key"));
+    }
     assignments.forEach(k => {
         const file = KA_FILE_LABELS[k.file_kind] || k.file_kind;
         const sel = KA_SELECTOR_LABELS[k.selector] || k.selector;
@@ -594,7 +599,7 @@ function openOrgBuilder(id){
     const vaultBody = document.getElementById("orgVaultInfoBody");
     vaultBody.innerHTML = "";
     const vaultBox = o ? buildVaultInfoBox(o.vault) : null;
-    const kaBox = o ? buildKeyAssignmentBox(o.key_assignments) : null;
+    const kaBox = o ? buildKeyAssignmentBox(o.key_assignments, o.all_files_key) : null;
     if(vaultBox) vaultBody.appendChild(vaultBox);
     if(kaBox) vaultBody.appendChild(kaBox);
     vaultWrap.hidden = !(vaultBox || kaBox);

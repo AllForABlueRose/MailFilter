@@ -50,6 +50,12 @@ UNLOCK_EXTRACT_DIRNAME = "._unlock_extract"
 # Python's zipfile mis-decodes as CP437; the Unlock Station re-decodes with this
 # (cp932 is Microsoft's Shift-JIS superset) so 文字化け names come out correct.
 UNLOCK_ZIP_LEGACY_ENCODING = "cp932"
+# Candidate encodings the Unlock Station tries when recovering a zip entry name,
+# scored for mojibake so the least-garbled decode wins (see unlock_ops._decode_zip_name).
+# Tried in order; ties resolve to the earliest, so genuine UTF-8 beats a coincidental
+# Shift-JIS decode. Applies to both flag states — some archivers set the UTF-8 flag
+# but actually write cp932 bytes, others write UTF-8 bytes without the flag.
+UNLOCK_ZIP_DECODE_ENCODINGS = ("utf-8", "cp932", "shift_jis")
 # Workshop → Calendar. Pinned-file records: dragging a today's-workspace file onto
 # a calendar day copies its bytes into the "limbo" holding folder (a sibling of the
 # dated folders, WORKSPACE_DIR/<LIMBO>/) and records a pin. On server startup any
@@ -183,7 +189,7 @@ ORG_CARD_INKS = ("white", "black")
 # which corner. `card_banner` runs an accent strip along the bottom, right, or
 # both edges. `card_scene` fills the card's bottom half with a soft motif. All
 # use the --deco colour (org colour on outline cards, --ink on filled ones).
-ORG_CARD_CORNERS = ("none", "banner", "ribbon", "star", "sun", "moon", "diamond")
+ORG_CARD_CORNERS = ("none", "banner", "ribbon", "star", "sun", "moon", "diamond", "dollar")
 ORG_CARD_CORNER_POSITIONS = ("top-right", "bottom-right")
 ORG_CARD_BANNERS = ("none", "bottom", "right", "both")
 ORG_CARD_SCENES = ("none", "wave", "cloud", "wind")
@@ -363,6 +369,8 @@ PASSWORD_SCAN_MAX_AGE_DAYS = 30
 #   resolve_customer_name — append a Suspected Customers List name found in content
 #   dedupe            — Brute Force Mail Deduplication (hide Zendesk notification
 #                       mails, graft their link onto the twin original mail)
+#   hide_safe_links   — hide an Outlook Safe Link when the plain URL it wraps is also
+#                       present in the same mail (enablement is activation, no toggle)
 EXPERIMENTAL_DEFAULTS = {
     "passwords": False,
     "normalize_width": False,
@@ -371,6 +379,7 @@ EXPERIMENTAL_DEFAULTS = {
     "append_customer_name": False,
     "resolve_customer_name": False,
     "dedupe": False,
+    "hide_safe_links": False,
 }
 # Brute Force Mail Deduplication (experimental): the half-window, in minutes, around
 # a detected notification mail within which a "twin" original mail is looked for

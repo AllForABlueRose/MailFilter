@@ -196,7 +196,14 @@ class OrgLabelTests(unittest.TestCase):
 
     def test_uses_display_name_and_color(self):
         org = {"name": "Acme Corporation", "display_name": "Acme", "color": "#ff3366"}
-        self.assertEqual(customers.org_label(org), {"name": "Acme", "color": "#ff3366"})
+        self.assertEqual(customers.org_label(org),
+                         {"name": "Acme", "color": "#ff3366",
+                          "card_style": "outline", "card_ink": "white"})
+
+    def test_carries_card_style_and_ink(self):
+        org = {"name": "Acme", "color": "#111", "card_style": "filled", "card_ink": "black"}
+        label = customers.org_label(org)
+        self.assertEqual((label["card_style"], label["card_ink"]), ("filled", "black"))
 
     def test_display_name_falls_back_to_real_name(self):
         org = {"name": "Acme Corporation", "display_name": "", "color": "#111111"}
@@ -281,7 +288,7 @@ class MailOrgResolverTests(unittest.TestCase):
 
     def test_display_vs_real_name(self):
         org = customers.resolve_mail_org(self._mail(sender_email="bob@acme.com"), self.orgs)
-        self.assertEqual(customers.org_label(org), {"name": "Acme", "color": "#222222"})  # pill
+        self.assertEqual(customers.org_label(org)["name"], "Acme")  # pill display name
         self.assertEqual(org["name"], "Acme Corp")  # download/CSV use the real name
 
     def test_keyword_and_operator_requires_both_terms(self):

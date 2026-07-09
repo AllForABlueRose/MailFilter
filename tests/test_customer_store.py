@@ -101,7 +101,7 @@ class CoerceTests(unittest.TestCase):
 
     def test_card_corner_accepts_new_icons(self):
         store = _store()
-        for corner in ("sun", "moon", "diamond"):
+        for corner in ("sun", "moon", "diamond", "dollar"):
             org = store.create({"name": corner, "card_corner": corner})
             self.assertEqual(org["card_corner"], corner)
 
@@ -352,6 +352,43 @@ class KeyAssignmentTests(unittest.TestCase):
         # An update that omits the field preserves it.
         again = store.update(org["id"], {"name": "Acme Renamed"})
         self.assertEqual(again["key_assignments"], org["key_assignments"])
+
+
+class AllFilesKeyTests(unittest.TestCase):
+    """The cross-kind "same managed key for all files" habit on an org."""
+
+    def test_new_org_has_empty_all_files_key(self):
+        self.assertEqual(_store().create({"name": "Acme"})["all_files_key"], {})
+
+    def test_record_sets_managed_selector(self):
+        store = _store()
+        org = store.create({"name": "Acme"})
+        updated = store.record_all_files_key(org["id"])
+        self.assertEqual(updated["all_files_key"]["selector"], "managed")
+        self.assertTrue(updated["all_files_key"]["recorded"])
+
+    def test_record_rejects_non_managed_and_unknown_org(self):
+        store = _store()
+        org = store.create({"name": "Acme"})
+        self.assertIsNone(store.record_all_files_key(org["id"], "recent_temporary"))
+        self.assertIsNone(store.record_all_files_key("no-such-org"))
+
+    def test_coerce_drops_invalid_and_preserved_on_update(self):
+        store = _store()
+        org = store.create({"name": "Acme", "all_files_key": {"selector": "temporary"}})
+        self.assertEqual(org["all_files_key"], {})   # only "managed" is valid
+        recorded = store.record_all_files_key(org["id"])
+        # An update that omits the field preserves it.
+        again = store.update(org["id"], {"name": "Acme Renamed"})
+        self.assertEqual(again["all_files_key"], recorded["all_files_key"])
+
+    def test_copy_isolates_all_files_key(self):
+        store = _store()
+        org = store.create({"name": "Acme"})
+        store.record_all_files_key(org["id"])
+        a = store.snapshot()[0]
+        a["all_files_key"]["selector"] = "mutated"
+        self.assertEqual(store.snapshot()[0]["all_files_key"]["selector"], "managed")
 
 
 if __name__ == "__main__":

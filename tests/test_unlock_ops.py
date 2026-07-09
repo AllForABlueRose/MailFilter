@@ -197,8 +197,8 @@ class ExcelUnlockTests(UnlockOpsBase):
 
 
 class ZipNameDecodingTests(UnlockOpsBase):
-    """Japanese (Shift-JIS/cp932) entry names, stored without the UTF-8 flag,
-    come out correctly instead of as 文字化け mojibake."""
+    """Japanese entry names come out correctly instead of as 文字化け mojibake, for
+    both flag states, while clean ASCII/UTF-8/accented-Latin names are preserved."""
 
     class _Info:
         def __init__(self, filename, flag_bits):
@@ -211,9 +211,33 @@ class ZipNameDecodingTests(UnlockOpsBase):
         info = self._Info(raw.decode("cp437"), 0)
         self.assertEqual(unlock_ops._decode_zip_name(info), "見積書.txt")
 
+    def test_utf8_bytes_without_flag_recovered(self):
+        # The regression the aggressive decoder fixes: UTF-8 bytes stored WITHOUT the
+        # UTF-8 flag. The old code forced cp932 and produced mojibake; now UTF-8 wins.
+        raw = "契約書.pdf".encode("utf-8")
+        info = self._Info(raw.decode("cp437"), 0)
+        self.assertEqual(unlock_ops._decode_zip_name(info), "契約書.pdf")
+
     def test_utf8_flagged_name_unchanged(self):
         info = self._Info("日本語.txt", 0x800)
         self.assertEqual(unlock_ops._decode_zip_name(info), "日本語.txt")
+
+    def test_ascii_name_unchanged(self):
+        info = self._Info("invoice_2026.pdf", 0)
+        self.assertEqual(unlock_ops._decode_zip_name(info), "invoice_2026.pdf")
+
+    def test_accented_latin_utf8_preserved(self):
+        # A genuine accented-Latin UTF-8 name must NOT be turned into half-width kana
+        # by a coincidental cp932 decode — the scorer penalises that misread.
+        raw = "café_Zürich.pdf".encode("utf-8")
+        info = self._Info(raw.decode("cp437"), 0)
+        self.assertEqual(unlock_ops._decode_zip_name(info), "café_Zürich.pdf")
+
+    def test_mojibake_score_ranks_japanese_clean(self):
+        clean = unlock_ops._mojibake_score("見積書.txt")
+        garbled = unlock_ops._mojibake_score("è¦\x8bç©\x8dæ\x9b¸.txt")
+        self.assertEqual(clean, 0)
+        self.assertGreater(garbled, clean)
 
     def test_extract_members_writes_japanese_name(self):
         src_zip = self.folder / "jp.zip"

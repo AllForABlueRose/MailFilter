@@ -237,26 +237,58 @@ def _unlock_zip(folder, path, a):
     return outputs
 
 
+def _mojibake_score(s):
+    """Heuristic "how garbled is this string" score — lower is better, 0 is clean.
+
+    Correctly-decoded Japanese (kanji, hiragana/katakana, fullwidth forms) and pure
+    ASCII score 0. Everything else non-ASCII is penalised: the U+FFFD replacement
+    char (a decode that lost data), Latin-1-supplement chars (the classic
+    Shift-JIS-read-as-Latin artifact), and **half-width katakana** — deliberately
+    penalised because misreading Latin/UTF-8 bytes as cp932 tends to yield half-width
+    kana, which would otherwise beat a genuine accented-Latin name like ``café``."""
+    score = 0
+    for ch in s:
+        cp = ord(ch)
+        if cp < 0x80:
+            continue  # ASCII: always fine
+        if ch == "�":
+            score += 100  # replacement char: a decode definitely lost data
+        elif (0x3000 <= cp <= 0x30FF        # CJK punctuation + hiragana + katakana
+              or 0x3400 <= cp <= 0x9FFF     # CJK ideographs (incl. extension A)
+              or 0xF900 <= cp <= 0xFAFF     # CJK compatibility ideographs
+              or 0xFF01 <= cp <= 0xFF60     # fullwidth ASCII variants
+              or 0xFFE0 <= cp <= 0xFFE6):   # fullwidth symbols
+            continue      # intentional CJK content
+        else:
+            score += 5    # Latin-1 supplement, half-width kana, box-drawing, etc.
+    return score
+
+
 def _decode_zip_name(info):
     """Best-effort correct Unicode name for a zip entry.
 
-    Python's zipfile decodes an entry name as UTF-8 only when general-purpose bit 11
-    (``0x800``) is set, otherwise as CP437. Windows/Japanese tooling stores names as
-    Shift-JIS (cp932) bytes without that flag, so recover the original bytes from the
-    CP437 mis-decode and re-decode them; fall back to the raw name if that fails."""
+    Python's zipfile decodes an entry name as UTF-8 when general-purpose bit 11
+    (``0x800``) is set, otherwise as CP437. Neither is reliable for Japanese: some
+    archivers set the UTF-8 flag but write Shift-JIS (cp932) bytes, others write
+    UTF-8 bytes without the flag. So recover the original bytes and try every
+    candidate encoding in ``config.UNLOCK_ZIP_DECODE_ENCODINGS``, then pick the
+    least-garbled result (:func:`_mojibake_score`); ties keep the earliest candidate
+    so genuine UTF-8 beats a coincidental cp932 decode."""
     name = info.filename
-    if info.flag_bits & 0x800:
-        return name  # already decoded as UTF-8
+    encoded_as = "utf-8" if (info.flag_bits & 0x800) else "cp437"
     try:
-        raw = name.encode("cp437")
+        raw = name.encode(encoded_as)
     except UnicodeEncodeError:
         return name
-    for enc in (config.UNLOCK_ZIP_LEGACY_ENCODING, "shift_jis"):
+    # Candidate 0 is the name zipfile already produced (so a clean decode is kept);
+    # the rest are re-decodes of the recovered raw bytes.
+    candidates = [name]
+    for enc in config.UNLOCK_ZIP_DECODE_ENCODINGS:
         try:
-            return raw.decode(enc)
+            candidates.append(raw.decode(enc))
         except (UnicodeDecodeError, LookupError):
             continue
-    return name
+    return min(candidates, key=_mojibake_score)
 
 
 def _safe_extract_dest(extract_dir, name):

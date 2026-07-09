@@ -59,17 +59,21 @@ function createCard(mail){
     return card;
 }
 
-// A right-aligned row of org pills, painted with each org's colour. The display
-// name is user input, so it is inserted as DOM text (the people-field rule).
+// A right-aligned row of org pills that mirror each org's card settings: a `filled`
+// card -> colour-filled pill with white/black ink; an `outline` card -> inverted
+// (light fill, coloured text + border). CSS reads --org-color; the style-/ink-
+// classes pick fill vs text. The display name is user input, so it is inserted as DOM
+// text (the people-field rule).
 function makeOrgLabels(labels){
     const row = document.createElement('div');
     row.className = 'card-orgs';
     labels.forEach(function(l){
         const pill = document.createElement('span');
-        pill.className = 'org-label';
+        pill.className = 'org-label style-' + (l.card_style || 'outline')
+            + (l.card_ink === 'black' ? ' ink-black' : '');
         pill.textContent = l.name;
         pill.title = l.name;
-        if(l.color){ pill.style.backgroundColor = l.color; }
+        if(l.color){ pill.style.setProperty('--org-color', l.color); }
         row.appendChild(pill);
     });
     return row;
@@ -165,6 +169,25 @@ function segmentDragStart(e, value){
     e.dataTransfer.effectAllowed = 'copy';
 }
 
+// Save one attachment into today's server workspace via the same endpoint (and thus
+// the same features: org resolution, manifest, datetime stamping, naming/dedup, the
+// 📥 downloaded tag) as the bulk "download tray" button — instead of a browser
+// download. Reflects the result inline, then refreshes the list so the tag shows.
+function downloadAttachmentToWorkspace(mail, att, statusEl){
+    if(statusEl){ statusEl.textContent = ' saving…'; }
+    fetch('/api/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({items: [{id: mail.id, index: att.index}],
+                              append_customer_name: appendCustomerName}),
+    }).then(r => r.json()).then(result => {
+        const ok = (result.saved || []).length;
+        const failed = (result.errors || []).length;
+        if(statusEl){ statusEl.textContent = ok ? ' ✓ saved' : (failed ? ' ✗ failed' : ''); }
+        if(ok && typeof loadMail === 'function'){ loadMail(); }
+    }).catch(() => { if(statusEl){ statusEl.textContent = ' ✗ failed'; } });
+}
+
 // Build the attachments/links block. The displayed name/URL is the server's
 // pre-escaped + keyword-highlighted HTML; the raw value (used for the icon,
 // href, and drag) never reaches the DOM as HTML.
@@ -192,6 +215,15 @@ function renderResources(mail){
             const name = document.createElement('span');
             name.innerHTML = att.filename_html;   // escaped + highlighted server-side
             a.appendChild(name);
+            const status = document.createElement('span');
+            status.className = 'resource-status';
+            a.appendChild(status);
+            // Clicking saves into today's server workspace (same features as the bulk
+            // download button), instead of a plain browser download.
+            a.addEventListener('click', e => {
+                e.preventDefault();
+                downloadAttachmentToWorkspace(mail, att, status);
+            });
             a.addEventListener('dragstart', e => segmentDragStart(e, att.filename));
             group.appendChild(a);
         });

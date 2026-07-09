@@ -158,6 +158,43 @@ class UnlockRouteTests(unittest.TestCase):
         captured = self._smart_unlock_assignments()
         self.assertEqual(captured["solo.zip"]["secret"], "sNew")
 
+    def _file_with_org(self, name, content=b"x"):
+        folder = self._today()
+        (folder / name).write_bytes(content)
+        workspace_manifest.record(str(folder), name, {
+            "org_id": self.org["id"], "org_name": "Acme Corp", "mail_id": "m1"})
+        return folder
+
+    def test_record_assignment_all_files_writes_cross_kind_habit(self):
+        self.client.post("/api/workspace/record-assignment",
+                         json={"all_files": [self.org["id"]]})
+        org = self.client.get("/api/organizations").get_json()["organizations"][0]
+        self.assertEqual(org["all_files_key"]["selector"], "managed")
+
+    def test_smart_unlock_broadcasts_all_files_key_across_kinds(self):
+        # Org habit: one managed key for every file, regardless of kind. The single
+        # managed key ("topsecret") should reach both the zip and the excel.
+        self.client.post("/api/workspace/record-assignment",
+                         json={"all_files": [self.org["id"]]})
+        self._plain_zip("pack.zip")
+        self._file_with_org("book.xlsx")
+        captured = self._smart_unlock_assignments()
+        self.assertEqual(captured["pack.zip"]["secret"], "topsecret")
+        self.assertEqual(captured["book.xlsx"]["secret"], "topsecret")
+        self.assertEqual(captured["book.xlsx"]["file_kind"], "excel")
+
+    def test_all_files_key_takes_precedence_over_per_kind(self):
+        # Even with a per-kind zip pattern recorded, the broadcast habit wins: the
+        # zip gets the managed key (not a per-kind temporary pairing).
+        self._temp_key("sTemp", self._recent(1))
+        self.client.post("/api/workspace/record-assignment", json={"records": [
+            {"org_id": self.org["id"], "file_kind": "zip", "key_kind": "temporary"}]})
+        self.client.post("/api/workspace/record-assignment",
+                         json={"all_files": [self.org["id"]]})
+        self._plain_zip("pack.zip")
+        captured = self._smart_unlock_assignments()
+        self.assertEqual(captured["pack.zip"]["secret"], "topsecret")
+
 
 if __name__ == "__main__":
     unittest.main()

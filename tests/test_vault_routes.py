@@ -215,7 +215,8 @@ class VaultRouteTests(unittest.TestCase):
             routes.refresh_then_scan(
                 store, self.app.extensions["password_settings_store"],
                 self.app.extensions["vault_store"], self.app.extensions["customer_store"],
-                self.app.extensions["experimental_store"])
+                self.app.extensions["experimental_store"],
+                self.app.extensions["customer_match_store"])
         finally:
             outlook.refresh = orig
         entries = self.client.get("/api/vault/entries").get_json()["entries"]

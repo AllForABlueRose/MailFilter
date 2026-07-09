@@ -215,7 +215,9 @@ def bring_last_workspace_to_today():
 
     Non-destructive: refuses when today's folder already **exists** (so nothing is
     clobbered — the Workbench button is disabled in that case anyway) and reports
-    when there is no earlier folder to carry forward. Returns a small result dict
+    when there is no earlier folder to carry forward. Any CSV report inside the
+    carried folder (``report_<old-date>.csv``) is re-dated to today so its filename
+    matches the new workspace. Returns a small result dict
     ``{"ok": bool, "folder"/"source"/"error": ...}``.
     """
     if not config.WORKSPACE_DIR.is_dir():
@@ -241,8 +243,45 @@ def bring_last_workspace_to_today():
     # Names are YYYY-MM-DD, so lexicographic max == the most recent date.
     latest = max(candidates, key=lambda p: p.name)
     os.replace(latest, today_path)
+    # Re-date any carried-over report so its filename reflects today (the date lives
+    # only in the name; the CSV body has no report-date to touch). Matches the name
+    # write_report() builds so a same-day re-export still overwrites in place.
+    desired = util.safe_filename(f"report_{today}.csv", "report")
+    for report in today_path.glob("report_*.csv"):
+        if report.name != desired:
+            os.replace(report, today_path / desired)
     log.info("Brought workspace %s forward to today (%s)", latest.name, today)
     return {"ok": True, "folder": str(today_path), "source": latest.name}
+
+
+def stamp_file_org(filename, org_id, org_name):
+    """Set (or clear) the customer organization of a file in **today's** workspace.
+
+    The Workbench "Stamp Customer Organization" action: dropping an org stamp on a
+    file writes its org into the folder manifest, so a user-placed file becomes
+    app-managed (visible with its org, and a Cleanup target like a download). A blank
+    ``org_id`` **clears** the org by removing the manifest entry (reverting the file to
+    user-added / no-org). Setting merges the org fields over any existing manifest
+    entry so an unlocked file keeps its ``mail_id``/``received``.
+
+    Returns ``{"ok": bool, "filename"/"org_id"/"org_name"/"error": ...}``. Rejects a
+    filename that isn't a plain file directly in today's folder (path traversal, a
+    subdirectory, or the manifest itself).
+    """
+    folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
+    name = os.path.basename(filename or "")
+    if not name or name != filename or name == config.WORKSPACE_MANIFEST_NAME:
+        return {"ok": False, "error": "invalid file name"}
+    path = folder / name
+    if not path.is_file():
+        return {"ok": False, "error": "file is not in today's workspace"}
+    if not org_id:
+        workspace_manifest.remove(str(folder), name)
+        return {"ok": True, "filename": name, "org_id": "", "org_name": ""}
+    meta = dict(workspace_manifest.lookup(str(folder), name) or {})
+    meta["org_id"], meta["org_name"] = org_id, org_name
+    workspace_manifest.record(str(folder), name, meta)
+    return {"ok": True, "filename": name, "org_id": org_id, "org_name": org_name}
 
 
 def person_text(name, email):

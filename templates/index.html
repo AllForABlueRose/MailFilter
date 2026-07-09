@@ -175,6 +175,10 @@
                  placeholder="Notification subject to detect (exact match)"
                  onchange="onDedupeSubjectChange()">
         </div>
+
+        <div class="exp-feature" data-feature="hide_safe_links" hidden>
+          <div class="exp-feature-name" title="While enabled, an Outlook Safe Link (safelinks.protection.outlook.com) is hidden from a mail's Links when the plain URL it wraps also appears in the same mail.">🔗 Hide Duplicate Safe Links</div>
+        </div>
       </div>
     </div>
 
@@ -414,6 +418,7 @@
           <option value="sun">Sun</option>
           <option value="moon">Moon</option>
           <option value="diamond">Diamond</option>
+          <option value="dollar">$ Dollar</option>
         </select>
         <button type="button" id="orgCardCornerPos" class="flip-btn org-corner-pos" data-value="top-right"
                 onclick="toggleOrgCornerPos()" title="Flip which corner the icon sits in">↗ Top-right</button>
@@ -654,6 +659,11 @@
           <span class="exp-check-name">🧬 Brute Force Mail Deduplication</span>
           <span class="exp-check-desc">Detect Zendesk notification mails by an exact subject; graft their ticket link onto the original "twin" mail within ±1 hour (matched by subject+body appearing in the notification), and hide the redundant notification. A view-only transform — the cache is never changed.</span>
         </label>
+        <label class="exp-check">
+          <input type="checkbox" data-feature="hide_safe_links">
+          <span class="exp-check-name">🔗 Hide Duplicate Safe Links</span>
+          <span class="exp-check-desc">When a mail carries both a plain URL and its Outlook Safe Link wrapper (safelinks.protection.outlook.com), hide the redundant safe-link duplicate. A view-only transform — the cache is never changed.</span>
+        </label>
       </div>
     </div>
     <div class="modal-actions auto-modal-actions">
@@ -726,7 +736,7 @@
           comes, it arrives in that day's workspace automatically.</span>
       </button>
       <button type="button" class="ws-card" onclick="openWorkshopWorkbench()">
-        <span class="ws-card-icon">🛠</span>
+        <span class="ws-card-icon">🛠️</span>
         <span class="ws-card-title">Workbench Processing</span>
         <span class="ws-card-desc">Work with today's downloaded files, or bring a
           previous day's workspace forward to today.</span>
@@ -770,7 +780,7 @@
   <div id="workshopWorkbench" class="ws-screen" hidden>
     <div class="ws-screen-bar">
       <button type="button" class="ws-back" onclick="workshopBack()">← Back</button>
-      <h3 class="ws-screen-title">🛠 Workbench Processing</h3>
+      <h3 class="ws-screen-title">🛠️ Workbench Processing</h3>
     </div>
     <div id="workbenchRoot"></div>
   </div>

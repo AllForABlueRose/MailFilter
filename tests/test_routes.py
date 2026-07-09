@@ -112,7 +112,8 @@ class RouteTests(unittest.TestCase):
         org = cs.create({"name": "Example Inc", "display_name": "Ex", "color": "#0a0b0c"})
         cs.set_domain(org["id"], "example.com", "member")
         vm = self.client.get("/api/mail").get_json()["mails"][0]
-        self.assertEqual(vm["org_labels"], [{"name": "Ex", "color": "#0a0b0c"}])
+        self.assertEqual(vm["org_labels"], [{"name": "Ex", "color": "#0a0b0c",
+                                             "card_style": "outline", "card_ink": "white"}])
 
     def test_api_mail_org_label_is_single_winner_rep_beats_member(self):
         # Seeded sender is example.com: member of Base, represented by Acme -> one pill.
@@ -122,7 +123,8 @@ class RouteTests(unittest.TestCase):
         acme = cs.create({"name": "Acme Corp", "display_name": "Acme", "color": "#abcdef"})
         cs.set_domain(acme["id"], "example.com", "representative")
         vm = self.client.get("/api/mail").get_json()["mails"][0]
-        self.assertEqual(vm["org_labels"], [{"name": "Acme", "color": "#abcdef"}])
+        self.assertEqual(vm["org_labels"], [{"name": "Acme", "color": "#abcdef",
+                                             "card_style": "outline", "card_ink": "white"}])
 
     def test_api_mail_pill_reflects_brute_force_only_when_enabled(self):
         cs = self.app.extensions["customer_store"]
@@ -135,7 +137,8 @@ class RouteTests(unittest.TestCase):
         # Enable the experimental feature -> the keyword org now drives the pill.
         self.app.extensions["experimental_store"].update({"resolve_customer_name": True})
         vm = next(m for m in self.client.get("/api/mail").get_json()["mails"] if m["id"] == "ID1")
-        self.assertEqual(vm["org_labels"], [{"name": "Globex", "color": "#00ff00"}])
+        self.assertEqual(vm["org_labels"], [{"name": "Globex", "color": "#00ff00",
+                                             "card_style": "outline", "card_ink": "white"}])
 
     def test_attachment_blacklist_omits_in_api(self):
         self.store.add_mails([
@@ -174,6 +177,27 @@ class RouteTests(unittest.TestCase):
 
     def test_thread_unknown_id_is_empty(self):
         self.assertEqual(self.client.get("/api/thread?id=nope").get_json()["mails"], [])
+
+    def test_download_single_item_saves_and_tags(self):
+        # Req 12: a per-attachment download reuses /api/download with a one-item list,
+        # inheriting the workspace save + the "downloaded" tag.
+        self.store.add_mails([make_mail(id="S1", attachments=[{"filename": "a.pdf"}])])
+        downloads = Path(self._tmpdir) / "one"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = downloads
+        try:
+            with mock.patch("mailfilter.outlook.fetch_attachment",
+                            side_effect=lambda mid, idx: ("a.pdf", b"bytes")):
+                resp = self.client.post("/api/download",
+                                        json={"items": [{"id": "S1", "index": 0}]})
+            self.assertEqual(len(resp.get_json()["saved"]), 1)
+            from datetime import datetime
+            folder = downloads / datetime.now().strftime("%Y-%m-%d")
+            self.assertTrue((folder / "a.pdf").exists())
+            m = next(x for x in self.client.get("/api/mail").get_json()["mails"] if x["id"] == "S1")
+            self.assertIn("downloaded", m["tags"])
+        finally:
+            config.WORKSPACE_DIR = orig
 
     def test_download_saves_attachments_to_dated_folder(self):
         self.store.add_mails([
@@ -348,6 +372,52 @@ class RouteTests(unittest.TestCase):
             self.assertFalse(data["ok"])
             self.assertIn("error", data)
             self.assertTrue((out / "2020-01-02").exists())  # untouched
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_workspace_file_org_sets_overwrites_and_clears(self):
+        from datetime import datetime
+        from mailfilter import workspace_manifest
+        out = Path(self._tmpdir) / "wstamp"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            a = self.client.post("/api/organizations", json={"name": "Acme Corp"}).get_json()
+            b = self.client.post("/api/organizations", json={"name": "Orion"}).get_json()
+            folder = out / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True)
+            (folder / "doc.pdf").write_text("x")
+
+            r = self.client.post("/api/workspace/file-org",
+                                 json={"filename": "doc.pdf", "org_id": a["id"]})
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(workspace_manifest.lookup(str(folder), "doc.pdf")["org_name"], "Acme Corp")
+
+            # Overwrite to another org.
+            self.client.post("/api/workspace/file-org",
+                             json={"filename": "doc.pdf", "org_id": b["id"]})
+            self.assertEqual(workspace_manifest.lookup(str(folder), "doc.pdf")["org_id"], b["id"])
+
+            # Clear.
+            self.client.post("/api/workspace/file-org",
+                             json={"filename": "doc.pdf", "org_id": ""})
+            self.assertIsNone(workspace_manifest.lookup(str(folder), "doc.pdf"))
+        finally:
+            config.WORKSPACE_DIR = orig
+
+    def test_workspace_file_org_unknown_org_400_and_missing_file_404(self):
+        from datetime import datetime
+        out = Path(self._tmpdir) / "wstamp2"
+        orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = out
+        try:
+            folder = out / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True)
+            (folder / "doc.pdf").write_text("x")
+            self.assertEqual(self.client.post("/api/workspace/file-org",
+                json={"filename": "doc.pdf", "org_id": "nope"}).status_code, 400)
+            self.assertEqual(self.client.post("/api/workspace/file-org",
+                json={"filename": "ghost.pdf", "org_id": ""}).status_code, 404)
         finally:
             config.WORKSPACE_DIR = orig
 

@@ -84,9 +84,11 @@ async function updateExperimental(){
     }catch(e){
         return;  // leave the panel open so the user can retry
     }
-    // Brute Force Resolve has no operational toggle — its enablement alone drives
-    // the mail-list org pill — so note whether it flipped to reload the list.
-    const resolveChanged = (!!experimentalEnabled['resolve_customer_name']) !== (!!saved['resolve_customer_name']);
+    // Brute Force Resolve and Hide Safe Links have no operational toggle — enablement
+    // alone changes the rendered mail — so note if either flipped to reload the list.
+    const resolveChanged =
+        (!!experimentalEnabled['resolve_customer_name']) !== (!!saved['resolve_customer_name']) ||
+        (!!experimentalEnabled['hide_safe_links']) !== (!!saved['hide_safe_links']);
     experimentalEnabled = saved;
     let operationalChanged = false;
     EXPERIMENTAL_FEATURES.forEach(f => {

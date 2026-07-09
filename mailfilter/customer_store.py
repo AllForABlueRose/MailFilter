@@ -115,6 +115,18 @@ def _coerce_key_assignments(raw):
     return out
 
 
+def _coerce_all_files_key(raw):
+    """Normalize the cross-kind "same key for all files" habit: ``{}`` when unset, else
+    ``{"selector": "managed", "recorded": <str>}``. Only the ``managed`` selector is
+    valid (the habit is "one managed key for every file of the org")."""
+    if not isinstance(raw, dict):
+        return {}
+    selector = str(raw.get("selector") or "").strip().lower()
+    if selector != "managed":
+        return {}
+    return {"selector": "managed", "recorded": _clean(raw.get("recorded"), 32)}
+
+
 class CustomerStore:
 
     def __init__(self, cache_file):
@@ -263,6 +275,23 @@ class CustomerStore:
             self._save()
             return self._copy(org)
 
+    def record_all_files_key(self, oid, selector="managed"):
+        """Record the cross-kind "same key for all files" habit for org ``oid`` — the
+        Unlock Station saw one managed key unlock the org's files across multiple file
+        kinds. Smart Key Assignment replays it by broadcasting the org's managed key to
+        every file. Only ``managed`` is valid. Returns the updated org, or ``None`` for
+        an unknown org / invalid selector."""
+        if str(selector or "").strip().lower() != "managed":
+            return None
+        with self._lock:
+            org = self._items.get(oid)
+            if org is None:
+                return None
+            recorded = datetime.now().strftime(config.RECEIVED_FORMAT)
+            org["all_files_key"] = {"selector": "managed", "recorded": recorded}
+            self._save()
+            return self._copy(org)
+
     # ----- internals -----
 
     def _drop_contact(self, email):
@@ -292,6 +321,7 @@ class CustomerStore:
         clone["domains"] = [dict(d) for d in org["domains"]]
         clone["contacts"] = [dict(c) for c in org["contacts"]]
         clone["key_assignments"] = [dict(k) for k in org.get("key_assignments", [])]
+        clone["all_files_key"] = dict(org.get("all_files_key", {}))
         return clone
 
     def _coerce(self, raw, base=None, new=False):
@@ -352,6 +382,8 @@ class CustomerStore:
             "contacts": _coerce_contacts(raw.get("contacts", base.get("contacts", []))),
             "key_assignments": _coerce_key_assignments(
                 raw.get("key_assignments", base.get("key_assignments", []))),
+            "all_files_key": _coerce_all_files_key(
+                raw.get("all_files_key", base.get("all_files_key", {}))),
             "created": created,
         }
 

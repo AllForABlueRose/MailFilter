@@ -381,6 +381,67 @@ class BringLastWorkspaceTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("error", result)
 
+    def test_carried_report_is_redated_to_today(self):
+        self._make("2020-01-02", "report_2020-01-02.csv", "carried.txt")
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertTrue(result["ok"])
+        today_path = config.WORKSPACE_DIR / self._today
+        self.assertTrue((today_path / f"report_{self._today}.csv").exists())
+        self.assertFalse((today_path / "report_2020-01-02.csv").exists())
+        self.assertTrue((today_path / "carried.txt").exists())   # other files untouched
+
+    def test_no_report_still_succeeds(self):
+        self._make("2020-01-02", "carried.txt")
+        result = workspace_ops.bring_last_workspace_to_today()
+        self.assertTrue(result["ok"])
+        today_path = config.WORKSPACE_DIR / self._today
+        self.assertEqual(list(today_path.glob("report_*.csv")), [])
+
+
+class StampFileOrgTests(unittest.TestCase):
+    """workspace_ops.stamp_file_org: set/overwrite/clear a today's-workspace file's org."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig = config.WORKSPACE_DIR
+        config.WORKSPACE_DIR = Path(self._tmp) / "workspace"
+        self.folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
+        self.folder.mkdir(parents=True)
+
+    def tearDown(self):
+        config.WORKSPACE_DIR = self._orig
+
+    def test_stamp_sets_org_on_external_file(self):
+        (self.folder / "notes.xlsx").write_text("x")
+        res = workspace_ops.stamp_file_org("notes.xlsx", "o1", "Acme Corp")
+        self.assertTrue(res["ok"])
+        meta = workspace_manifest.lookup(str(self.folder), "notes.xlsx")
+        self.assertEqual((meta["org_id"], meta["org_name"]), ("o1", "Acme Corp"))
+
+    def test_stamp_merges_preserving_mail_fields(self):
+        (self.folder / "inv.pdf").write_text("x")
+        workspace_manifest.record(str(self.folder), "inv.pdf", {
+            "org_id": "", "org_name": "", "mail_id": "m9", "received": "2026-05-05 08:00:00"})
+        workspace_ops.stamp_file_org("inv.pdf", "o2", "Orion")
+        meta = workspace_manifest.lookup(str(self.folder), "inv.pdf")
+        self.assertEqual(meta["org_id"], "o2")
+        self.assertEqual(meta["mail_id"], "m9")            # preserved
+        self.assertEqual(meta["received"], "2026-05-05 08:00:00")
+
+    def test_clear_removes_manifest_entry(self):
+        (self.folder / "inv.pdf").write_text("x")
+        workspace_manifest.record(str(self.folder), "inv.pdf", {
+            "org_id": "o1", "org_name": "Acme Corp", "mail_id": "m1", "received": ""})
+        res = workspace_ops.stamp_file_org("inv.pdf", "", "")
+        self.assertTrue(res["ok"])
+        self.assertIsNone(workspace_manifest.lookup(str(self.folder), "inv.pdf"))
+
+    def test_missing_file_is_error(self):
+        self.assertFalse(workspace_ops.stamp_file_org("ghost.txt", "o1", "Acme")["ok"])
+
+    def test_path_traversal_rejected(self):
+        self.assertFalse(workspace_ops.stamp_file_org("../escape.txt", "o1", "Acme")["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

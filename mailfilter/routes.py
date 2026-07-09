@@ -50,21 +50,29 @@ def resolve_org_id(customer_store, email):
     return res.get("rep_org_id") or res.get("member_org_id")
 
 
-def capture_scanned_passwords(store, vault_store, customer_store):
-    """Record the latest scan's detected passwords into the unlocked vault (sender's
-    org, or the Unassigned bucket). Idempotent; returns how many **genuinely new**
-    keys were added (a re-detected password that dedups onto an existing key does not
-    count).
+def capture_scanned_passwords(store, vault_store, customer_store,
+                              experimental_store, customer_match_store):
+    """Record the latest scan's detected passwords into the unlocked vault, filed under
+    each mail's resolved customer org (or the Unassigned bucket). Idempotent; returns
+    how many **genuinely new** keys were added (a re-detected password that dedups onto
+    an existing key does not count).
 
-    A captured key is stamped with the source mail's received datetime (not the scan
-    time), so its ``scan_dt`` reflects when the password actually arrived."""
+    Org resolution uses the same shared resolver as the mail-list pill / download / CSV
+    (``customers.mail_org_resolver``): the Brute Force keyword tier is honoured when the
+    ``resolve_customer_name`` experimental feature is on, otherwise sender resolution
+    (representative > member). A captured key is stamped with the source mail's received
+    datetime (not the scan time), so its ``scan_dt`` reflects when the password arrived."""
+    mappings = (customer_match_store.mappings()
+                if experimental_store.snapshot().get("resolve_customer_name") else None)
+    resolve_org = customers.mail_org_resolver(customer_store.snapshot(), mappings)
     captured = 0
     for mail in store.snapshot():
         secrets = mail.get("_passwords") or []
         if not secrets:
             continue
         email = mail.get("sender_email") or ""
-        org_id = resolve_org_id(customer_store, email) or config.VAULT_UNASSIGNED_ORG_ID
+        org = resolve_org(mail)
+        org_id = (org.get("id") if org else None) or config.VAULT_UNASSIGNED_ORG_ID
         received = mail.get("received")
         for secret in secrets:
             _entry, created = vault_store.capture_scan(
@@ -75,7 +83,7 @@ def capture_scanned_passwords(store, vault_store, customer_store):
 
 
 def run_password_scan(store, password_settings, vault_store, customer_store,
-                      experimental_store):
+                      experimental_store, customer_match_store):
     """Compile patterns, scan recent cached mail, record hits, and (while the vault is
     unlocked) auto-capture them. Shared by POST /api/passwords/scan, the on-unlock
     auto-scan, and the post-refresh hook. Returns the JSON-able result dict.
@@ -108,7 +116,9 @@ def run_password_scan(store, password_settings, vault_store, customer_store,
             matches[mail["id"]] = found
     flagged = store.apply_password_scan(matches)
     unlocked = vault_store.is_unlocked()
-    captured = capture_scanned_passwords(store, vault_store, customer_store) if unlocked else 0
+    captured = (capture_scanned_passwords(
+        store, vault_store, customer_store, experimental_store, customer_match_store)
+        if unlocked else 0)
     pending = 0 if unlocked else sum(len(v) for v in matches.values())
     if unlocked:
         log.info("SDS scan: %d mail(s) scanned, %d flagged, %d new key(s) captured",
@@ -127,13 +137,13 @@ def run_password_scan(store, password_settings, vault_store, customer_store,
 
 
 def refresh_then_scan(store, password_settings, vault_store, customer_store,
-                      experimental_store):
+                      experimental_store, customer_match_store):
     """Refresh callback for the scheduler and POST /refresh: fetch + sync mail from
     Outlook, then run an SDS scan so badges/captures reflect newly-arrived mail. The
     scan is read-only against the mailbox and only writes the vault when unlocked."""
     outlook.refresh(store)
     run_password_scan(store, password_settings, vault_store, customer_store,
-                      experimental_store)
+                      experimental_store, customer_match_store)
 
 
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
@@ -142,9 +152,10 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                      calendar_store):
     bp = Blueprint("mailfilter", __name__)
 
-    def view_model(mail, query, resolve_org=None):
+    def view_model(mail, query, resolve_org=None, hide_safe_links=False):
         view = to_view_model(mail, query.main, query.optional,
-                             query.attachment_blacklist, query.links_blacklist)
+                             query.attachment_blacklist, query.links_blacklist,
+                             hide_safe_links=hide_safe_links)
         view["tags"] = tag_store.tags_for(mail["id"])
         # The mail's single resolved customer organization, when a resolver is
         # supplied (built once per request). One shared source (Brute Force > rep >
@@ -167,7 +178,8 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         return resolve_org_id(customer_store, email)
 
     def _capture_scanned_to_vault():
-        return capture_scanned_passwords(store, vault_store, customer_store)
+        return capture_scanned_passwords(
+            store, vault_store, customer_store, experimental_store, customer_match_store)
 
     def _flush_vault_captures():
         """Re-home parked captures, then record pending scan hits. No-op while
@@ -192,7 +204,7 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
     def _run_password_scan():
         return run_password_scan(store, password_settings, vault_store, customer_store,
-                                 experimental_store)
+                                 experimental_store, customer_match_store)
 
     def _on_vault_unlocked():
         """After a successful create/unlock: re-home parked captures, then auto-scan
@@ -277,7 +289,7 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         threading.Thread(
             target=refresh_then_scan,
             args=(store, password_settings, vault_store, customer_store,
-                  experimental_store),
+                  experimental_store, customer_match_store),
             daemon=True,
         ).start()
         return jsonify({"status": "started"})
@@ -305,16 +317,17 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             for twin_id in twin_links:
                 tag_store.record_once(twin_id, "deduped")
         resolve_org = _mail_org_resolver()
+        hide_safe = bool(experimental_store.snapshot().get("hide_safe_links"))
         out = []
         for m in mails:
             if m["id"] in hidden:
                 continue
-            view = view_model(m, query, resolve_org)
+            view = view_model(m, query, resolve_org, hide_safe_links=hide_safe)
             urls = twin_links.get(m["id"])
             if urls:
                 view["links"] = view["links"] + extra_link_views(
                     urls, query.main, query.optional, [l["url"] for l in view["links"]],
-                    blacklist=query.links_blacklist)
+                    blacklist=query.links_blacklist, hide_safe_links=hide_safe)
             out.append(view)
         return jsonify({"mails": out, "query_error": "", **status})
 
@@ -326,7 +339,9 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         query = MailQuery.from_args(request.args)
         mails = store.thread_for(request.args.get("id", ""))
         resolve_org = _mail_org_resolver()
-        return jsonify({"mails": [view_model(m, query, resolve_org) for m in mails]})
+        hide_safe = bool(experimental_store.snapshot().get("hide_safe_links"))
+        return jsonify({"mails": [view_model(m, query, resolve_org, hide_safe_links=hide_safe)
+                                  for m in mails]})
 
     @bp.get("/attachments/<mail_id>/<int:index>")
     def download_attachment(mail_id, index):
@@ -445,6 +460,30 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         result = workspace_ops.bring_last_workspace_to_today()
         return jsonify(result), (200 if result.get("ok") else 409)
 
+    @bp.post("/api/workspace/file-org")
+    def api_workspace_file_org():
+        """Set or clear a today's-workspace file's customer organization.
+
+        Body ``{filename, org_id}``. Used by Workbench Processing's "Stamp Customer
+        Organization": writes the file's org into the folder manifest (making a
+        user-placed file app-managed). A blank ``org_id`` clears the org. No secrets,
+        so no vault gate. **400** for an unknown org, **404** when the file isn't in
+        today's workspace.
+        """
+        body = request.get_json(silent=True) or {}
+        filename = body.get("filename") or ""
+        org_id = str(body.get("org_id") or "")
+        org_name = ""
+        if org_id:
+            org = next((o for o in customer_store.snapshot() if o["id"] == org_id), None)
+            if org is None:
+                return jsonify({"ok": False, "error": "unknown organization"}), 400
+            org_name = org.get("name", "")
+        result = workspace_ops.stamp_file_org(filename, org_id, org_name)
+        if not result.get("ok"):
+            return jsonify(result), 404
+        return jsonify(result)
+
     # ----- Unlock Station (Key Vault ⇄ workspace files) -----
 
     def _vault_entry_index():
@@ -521,9 +560,12 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     def api_workspace_record_assignment():
         """Record each successful unlock as a per-org key-assignment pattern.
 
-        Body ``{records: [{org_id, file_kind, key_kind}]}`` (from the client's last
-        unlock). ``key_kind`` (managed/temporary) becomes the stored selector. No
-        secrets involved, so no unlock gate. Returns the org ids updated.
+        Body ``{records: [{org_id, file_kind, key_kind}], all_files: [org_id, ...]}``
+        (from the client's last unlock). Per-kind ``key_kind`` (managed/temporary)
+        becomes the stored selector; ``all_files`` lists orgs where one managed key
+        unlocked files across multiple kinds, recorded as the cross-kind "same key for
+        all files" habit. No secrets involved, so no unlock gate. Returns the org ids
+        updated.
         """
         body = request.get_json(silent=True) or {}
         updated = []
@@ -535,6 +577,10 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                 continue
             org = customer_store.record_key_assignment(
                 r.get("org_id"), r.get("file_kind"), selector)
+            if org is not None:
+                updated.append(org["id"])
+        for org_id in body.get("all_files") or []:
+            org = customer_store.record_all_files_key(org_id)
             if org is not None:
                 updated.append(org["id"])
         return jsonify({"recorded": updated})
@@ -566,10 +612,28 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         entry_idx = {e["id"]: e for items in by_org.values() for e in items}
         orgs = {o["id"]: o for o in customer_store.snapshot()}
 
-        # Group files by (org, file kind) among orgs with a recorded pattern for that
-        # kind, then pair keys to files newest->oldest within each group.
+        assigned = {}  # filename -> entry_id
+
+        # Cross-kind habit takes precedence: an org flagged "same key for all files"
+        # gets its newest managed key broadcast to every one of its files, regardless
+        # of file kind, instead of the per-kind pairing below.
+        broadcast_orgs = set()
+        for f in listing["files"]:
+            org = orgs.get(f["org_id"])
+            if not org or not org.get("all_files_key"):
+                continue
+            managed = [e for e in by_org.get(f["org_id"], []) if e.get("kind") == "managed"]
+            if not managed:
+                continue
+            assigned[f["name"]] = managed[0]["id"]   # newest managed key (by_org is ordered)
+            broadcast_orgs.add(f["org_id"])
+
+        # Group the remaining files by (org, file kind) among orgs with a recorded
+        # pattern for that kind, then pair keys to files newest->oldest within each group.
         groups = {}
         for f in listing["files"]:
+            if f["org_id"] in broadcast_orgs:
+                continue
             org = orgs.get(f["org_id"])
             if not org:
                 continue
@@ -579,7 +643,6 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                 continue
             groups.setdefault((f["org_id"], f["kind"]), (pattern["selector"], []))[1].append(f)
 
-        assigned = {}  # filename -> entry_id
         for (org_id, _kind), (selector, files) in groups.items():
             want = "managed" if selector == "managed" else "temporary"
             keys = [e for e in by_org.get(org_id, []) if e.get("kind") == want]

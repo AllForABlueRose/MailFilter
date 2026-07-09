@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from config import PREVIEW_CHARS, PREVIEW_MAX_LINES
 
-from . import expr
+from . import expr, safelinks
 
 
 def _excerpt(body):
@@ -22,7 +22,8 @@ def _excerpt(body):
 
 
 def to_view_model(mail, main_node, optional_node,
-                  attachment_blacklist=None, links_blacklist=None):
+                  attachment_blacklist=None, links_blacklist=None,
+                  hide_safe_links=False):
     main_terms = expr.operands(main_node)
     optional_terms = expr.operands(optional_node)
     preview = html.escape(_excerpt(mail.get("body", "")))
@@ -45,7 +46,7 @@ def to_view_model(mail, main_node, optional_node,
         # for display, alongside the raw value used for download/href/drag.
         # Blacklisted attachments/links are dropped here (display + workspace).
         "attachments": _attachments(mail, main_terms, optional_terms, attachment_blacklist),
-        "links": _links(mail, main_terms, optional_terms, links_blacklist),
+        "links": _links(mail, main_terms, optional_terms, links_blacklist, hide_safe_links),
         # Smart Password Detection results from the last manual scan (empty until
         # one runs). Raw candidate strings; the frontend inserts them as DOM text
         # (a title tooltip), never HTML, like the people fields above.
@@ -125,17 +126,26 @@ def _link_view(url, main_terms, optional_terms):
     return {"url": url, "url_html": _highlight(html.escape(url), main_terms, optional_terms)}
 
 
-def _links(mail, main_terms, optional_terms, blacklist):
-    """http(s) links as raw URL + a highlighted (escaped) variant for display."""
+def _links(mail, main_terms, optional_terms, blacklist, hide_safe_links=False):
+    """http(s) links as raw URL + a highlighted (escaped) variant for display.
+
+    When ``hide_safe_links`` is set, Outlook Safe Links whose decoded target also
+    appears as a plain URL in the same mail are dropped as redundant (see
+    :mod:`mailfilter.safelinks`)."""
+    urls = mail.get("_links", [])
+    hidden = safelinks.hidden_safe_links(urls) if hide_safe_links else set()
     out = []
-    for url in mail.get("_links", []):
+    for url in urls:
+        if url in hidden:
+            continue
         if blacklist is not None and expr.evaluate(blacklist, url.lower()):
             continue
         out.append(_link_view(url, main_terms, optional_terms))
     return out
 
 
-def extra_link_views(urls, main_node, optional_node, existing_urls=(), blacklist=None):
+def extra_link_views(urls, main_node, optional_node, existing_urls=(), blacklist=None,
+                     hide_safe_links=False):
     """Build ``{url, url_html}`` views for extra links grafted onto a mail.
 
     Used by the Brute Force Mail Deduplication transform (``routes.api_mail``) to
@@ -150,9 +160,13 @@ def extra_link_views(urls, main_node, optional_node, existing_urls=(), blacklist
     main_terms = expr.operands(main_node)
     optional_terms = expr.operands(optional_node)
     seen = set(existing_urls)
+    # A grafted safe link is redundant when its plain twin is present anywhere in the
+    # combined set (the twin's own links + the grafted ones).
+    hidden = (safelinks.hidden_safe_links(list(existing_urls) + list(urls))
+              if hide_safe_links else set())
     out = []
     for url in urls:
-        if url in seen:
+        if url in seen or url in hidden:
             continue
         seen.add(url)
         if blacklist is not None and expr.evaluate(blacklist, url.lower()):

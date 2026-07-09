@@ -91,6 +91,30 @@ class ToViewModelTests(unittest.TestCase):
         self.assertEqual([l["url"] for l in vm["links"]], ["https://good.com/y"])
 
 
+class SafeLinkHidingTests(unittest.TestCase):
+    """`hide_safe_links` drops an Outlook Safe Link when its plain twin is present."""
+
+    SAFE = ("https://nam06.safelinks.protection.outlook.com/"
+            "?url=https%3A%2F%2Fexample.com%2Fp&data=z")
+
+    def _vm(self, body, hide):
+        mail = MailStore._with_derived(make_mail(body=body))
+        mail["is_thread"] = False
+        return to_view_model(mail, None, None, hide_safe_links=hide)
+
+    def test_safe_link_hidden_when_flag_on(self):
+        vm = self._vm(f"see https://example.com/p or {self.SAFE}", True)
+        self.assertEqual([l["url"] for l in vm["links"]], ["https://example.com/p"])
+
+    def test_both_kept_when_flag_off(self):
+        vm = self._vm(f"see https://example.com/p or {self.SAFE}", False)
+        self.assertEqual(len(vm["links"]), 2)
+
+    def test_safe_link_kept_when_no_twin(self):
+        vm = self._vm(f"only {self.SAFE}", True)
+        self.assertEqual([l["url"] for l in vm["links"]], [self.SAFE])
+
+
 class HighlightTests(unittest.TestCase):
     def test_main_uses_distinct_class_from_optional(self):
         out = _highlight("alpha beta", _terms("alpha"), _terms("beta"))

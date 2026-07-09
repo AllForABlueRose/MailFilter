@@ -186,12 +186,16 @@ def resolve(email, orgs):
 
 
 def _org_label(org):
-    """A mail-list label for ``org``: ``{name, color}``. ``name`` is the display
-    name (the nickname if set, else the real name — mirroring the frontend's
-    ``orgDisplayName``); ``color`` is the org's card colour. Display-name-only, so
-    it never leaks the real name when a nickname is set."""
+    """A mail-list label for ``org``: ``{name, color, card_style, card_ink}``. ``name``
+    is the display name (the nickname if set, else the real name — mirroring the
+    frontend's ``orgDisplayName``); ``color`` is the org's card colour. ``card_style``
+    (outline/filled) and ``card_ink`` (white/black) let the pill mirror the card's
+    appearance. Display-name-only, so it never leaks the real name when a nickname is
+    set."""
     display = (org.get("display_name") or "").strip() or org.get("name", "")
-    return {"name": display, "color": org.get("color", "")}
+    return {"name": display, "color": org.get("color", ""),
+            "card_style": org.get("card_style", "outline"),
+            "card_ink": org.get("card_ink", "white")}
 
 
 # Public alias: the mail-list pill for a single resolved org (display name + colour).

@@ -487,11 +487,14 @@ body{
     max-width:220px;
 }
 .org-label{
+    --org-color:#9ca3af;
     font-size:11px;
     line-height:1;
     font-weight:600;
+    /* Default (filled): colour fill, white ink. Mirrors a filled card. */
     color:#fff;
-    background:#9ca3af;
+    background:var(--org-color);
+    border:1px solid var(--org-color);
     padding:3px 8px;
     border-radius:10px;
     max-width:200px;
@@ -500,6 +503,14 @@ body{
     white-space:nowrap;
     cursor:default;
 }
+.org-label.ink-black{ color:#000; }
+/* Outline card -> inverted pill: light fill, coloured text + border. */
+.org-label.style-outline{
+    background:color-mix(in srgb, var(--org-color) 14%, #fff);
+    color:var(--org-color);
+    border-color:var(--org-color);
+}
+.org-label.style-outline.ink-black{ color:#000; }
 .card-tag{
     font-size:15px;
     line-height:1;
@@ -780,7 +791,9 @@ input.drop-target{
     font-size:14px;
     padding:2px 0;
     word-break:break-all;
+    cursor:pointer;
 }
+.resource-status{ font-size:11px; color:#6b7280; }
 .resource-group:hover .resource-item{
     display:block;
 }
@@ -1221,10 +1234,12 @@ input.drop-target{
 .org-corner.corner-star.pos-top-right,
 .org-corner.corner-sun.pos-top-right,
 .org-corner.corner-moon.pos-top-right,
+.org-corner.corner-dollar.pos-top-right,
 .org-corner.corner-diamond.pos-top-right{ top:30px; }
 .org-corner.corner-star.pos-bottom-right,
 .org-corner.corner-sun.pos-bottom-right,
 .org-corner.corner-moon.pos-bottom-right,
+.org-corner.corner-dollar.pos-bottom-right,
 .org-corner.corner-diamond.pos-bottom-right{ bottom:30px; }
 .org-corner.corner-star::before,
 .org-corner.corner-sun::before,
@@ -1251,9 +1266,19 @@ input.drop-target{
     -webkit-mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='5' fill='white'/><g stroke='white' stroke-width='2' stroke-linecap='round'><line x1='12' y1='1' x2='12' y2='4'/><line x1='12' y1='20' x2='12' y2='23'/><line x1='1' y1='12' x2='4' y2='12'/><line x1='20' y1='12' x2='23' y2='12'/><line x1='4' y1='4' x2='6' y2='6'/><line x1='18' y1='18' x2='20' y2='20'/><line x1='4' y1='20' x2='6' y2='18'/><line x1='18' y1='6' x2='20' y2='4'/></g></svg>") center/contain no-repeat;
     mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='5' fill='white'/><g stroke='white' stroke-width='2' stroke-linecap='round'><line x1='12' y1='1' x2='12' y2='4'/><line x1='12' y1='20' x2='12' y2='23'/><line x1='1' y1='12' x2='4' y2='12'/><line x1='20' y1='12' x2='23' y2='12'/><line x1='4' y1='4' x2='6' y2='6'/><line x1='18' y1='18' x2='20' y2='20'/><line x1='4' y1='20' x2='6' y2='18'/><line x1='18' y1='6' x2='20' y2='4'/></g></svg>") center/contain no-repeat;
 }
+/* Crescent = a white disc minus an offset black disc (white shows, black hides in a
+   mask). Two circles avoid the arc-radius degeneracy the old single-path moon hit. */
 .org-corner.corner-moon::before{
-    -webkit-mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 3 A9 9 0 1 0 16 21 A7 7 0 1 1 16 3 Z' fill='white'/></svg>") center/contain no-repeat;
-    mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 3 A9 9 0 1 0 16 21 A7 7 0 1 1 16 3 Z' fill='white'/></svg>") center/contain no-repeat;
+    -webkit-mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='white'/><circle cx='16' cy='9' r='8' fill='black'/></svg>") center/contain no-repeat;
+    mask:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='white'/><circle cx='16' cy='9' r='8' fill='black'/></svg>") center/contain no-repeat;
+}
+.org-corner.corner-dollar::before{
+    content:"$";
+    color:var(--deco);
+    font-weight:800;
+    font-size:20px;
+    line-height:1;
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,0.25));
 }
 
 /* Bottom-half scenes: a soft motif band across the card's lower half. Kept faint
@@ -1365,6 +1390,9 @@ input.drop-target{
     color:var(--org-color);
     overflow-wrap:anywhere;
 }
+/* Black ink applies to the title on outline cards too (filled cards already bind the
+   title to --ink); both resolve to black, so this one rule covers both styles. */
+.org-card.ink-black .org-card-name{ color:#000; }
 /* Category label: rounded pill pinned top-right, tinted by its own --cat-color
    with a dotted border and a dotted (polka) fill over a light tint. */
 .org-cat{
@@ -2116,6 +2144,8 @@ input.drop-target{
 }
 .ws-screen-title{ margin:0; font-size:16px; color:#374151; }
 .ws-back{
+    width:auto;      /* reset global button{width:100%} so it hugs "← Back" and sits left */
+    margin:0;        /* reset global button margin-bottom */
     padding:7px 14px;
     border:1px solid #d1d5db;
     border-radius:8px;
@@ -2467,9 +2497,10 @@ input.drop-target{
     border-radius:8px; font-size:13px; width:220px; max-width:50%;
 }
 .unlock-grid{ overflow:auto; padding:4px 14px 14px; }
-/* Files view: org panels shrink to fit their tiles and flow side-by-side (wrapping),
-   like a standard file explorer — instead of each org panel being a full-width row. */
+/* Keys and files views: org panels shrink to fit their tiles and flow side-by-side
+   (wrapping), like a standard file explorer — instead of each panel being a full-width row. */
 .unlock-file-flow{ display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; }
+.unlock-file-flow .unlock-key-group,
 .unlock-file-flow .unlock-file-group{ margin-bottom:0; max-width:100%; }
 .unlock-empty{ color:#6b7280; font-size:13px; padding:8px 2px; }
 
@@ -2524,8 +2555,22 @@ input.drop-target{
 
 /* Workbench Processing screen: toolbar (Bring Last Workspace to Today) + file grid. */
 .wb-bar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:4px 14px 10px; }
-.wb-bring-btn:disabled{ opacity:.5; cursor:not-allowed; }
+.wb-bring-btn:disabled, .wb-stamp-btn:disabled{ opacity:.5; cursor:not-allowed; }
 .wb-status{ font-size:13px; color:#374151; }
+/* "Stamp Customer Organization" builder: org picker + a draggable stamp chip. */
+.wb-stamp-panel{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:0 14px 10px; }
+.wb-stamp-panel .suspected-org-combo{ flex:0 0 220px; max-width:220px; }
+.wb-stamp-lead{ font-size:13px; font-weight:600; color:#374151; }
+.wb-stamp-hint{ font-size:12px; color:#6b7280; }
+.wb-stamp-chip{
+    display:inline-block; padding:4px 10px; border-radius:999px; cursor:grab;
+    font-size:12px; font-weight:600; background:#eef2ff; border:1px solid #c7d2fe;
+}
+.wb-stamp-chip.has-org{
+    background:color-mix(in srgb, var(--org-color,#9ca3af) 16%, #fff);
+    border-color:color-mix(in srgb, var(--org-color,#9ca3af) 40%, #fff);
+}
+.wb-stamp-chip:active{ cursor:grabbing; }
 .unlock-assigned{ display:flex; align-items:center; gap:4px; margin-top:6px; }
 .unlock-assigned-key{
     font-size:11px; color:#065f46; background:#d1fae5; padding:1px 6px; border-radius:999px;
