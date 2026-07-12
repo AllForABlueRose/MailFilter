@@ -7,6 +7,7 @@ how the store hands mails to the read side.
 
 import unittest
 
+import config
 from mailfilter import customers
 from mailfilter.store import MailStore
 from tests.factories import make_mail
@@ -323,6 +324,85 @@ class MailOrgResolverTests(unittest.TestCase):
         org = customers.resolve_mail_org(
             self._mail(sender_email="bob@acme.com", body="x"), self.orgs, mappings)
         self.assertEqual(org["id"], "acme")  # fell through to sender rep
+
+
+class InternalDomainTests(unittest.TestCase):
+    """Which domains a reply template treats as internal (`sender.is_internal`).
+
+    Decided ENTIRELY by data the user entered — there is no config list of internal
+    domains. The mailbox verified against Outlook, plus every **Root** (your own
+    company) and **Partner** organization's **member** domains. Never a representative's
+    domain: they front the org from outside it.
+    """
+
+    def _orgs(self):
+        return [
+            {"id": "r1", "name": "My Corp", "category": "Root",
+             "domains": [{"domain": "mycorp.co.jp", "role": "member"}], "contacts": []},
+            {"id": "p1", "name": "Orion", "category": "Partner",
+             "domains": [{"domain": "orion.com", "role": "member"},
+                         {"domain": "contractor.io", "role": "representative"}],
+             "contacts": []},
+            {"id": "v1", "name": "Nordwind", "category": "Vendor",
+             "domains": [{"domain": "nordwind.de", "role": "member"}], "contacts": []},
+            {"id": "c1", "name": "Acme", "category": "Customer",
+             "domains": [{"domain": "acme.co.jp", "role": "member"}], "contacts": []},
+        ]
+
+    def test_a_partner_member_domain_is_internal(self):
+        self.assertIn("orion.com", customers.internal_domains(self._orgs()))
+
+    def test_a_root_member_domain_is_internal(self):
+        # Root is your own company: this is how a SECOND domain of your own is declared,
+        # since your mailbox only ever reveals one.
+        self.assertIn("mycorp.co.jp", customers.internal_domains(self._orgs()))
+
+    def test_a_partner_REPRESENTATIVE_domain_is_not_internal(self):
+        # A representative fronts the org from outside it, so their domain does not
+        # inherit the org's internal standing. Members only.
+        self.assertNotIn("contractor.io", customers.internal_domains(self._orgs()))
+
+    def test_a_vendor_or_customer_domain_is_not_internal(self):
+        internal = customers.internal_domains(self._orgs())
+        self.assertNotIn("nordwind.de", internal)
+        self.assertNotIn("acme.co.jp", internal)
+
+    def test_the_users_own_domain_is_internal(self):
+        internal = customers.internal_domains(self._orgs(), "me@mycorp.com")
+        self.assertIn("mycorp.com", internal)
+
+    def test_the_mailbox_and_the_root_org_domains_coexist(self):
+        # The one your mailbox is on, AND the others you declared under Root.
+        internal = customers.internal_domains(self._orgs(), "me@mycorp.com")
+        self.assertIn("mycorp.com", internal)      # from the verified mailbox
+        self.assertIn("mycorp.co.jp", internal)    # from the Root org
+
+    def test_without_a_verified_mailbox_only_the_orgs_remain(self):
+        # Honest: until the app knows who you are, it cannot know who your colleagues
+        # are — but the Root/Partner orgs you declared still stand.
+        self.assertEqual(customers.internal_domains(self._orgs()),
+                         frozenset({"mycorp.co.jp", "orion.com"}))
+
+    def test_the_categories_match_case_insensitively(self):
+        # A category is typed by hand, so "partner" / "root" must count too.
+        orgs = [{"id": "p", "name": "P", "category": "pArTnEr",
+                 "domains": [{"domain": "p.com", "role": "member"}], "contacts": []},
+                {"id": "r", "name": "R", "category": "rOOt",
+                 "domains": [{"domain": "r.com", "role": "member"}], "contacts": []}]
+        internal = customers.internal_domains(orgs)
+        self.assertIn("p.com", internal)
+        self.assertIn("r.com", internal)
+
+    def test_domains_are_lowercased(self):
+        orgs = [{"id": "p", "name": "P", "category": "Partner",
+                 "domains": [{"domain": "  ORION.COM ", "role": "member"}],
+                 "contacts": []}]
+        self.assertIn("orion.com", customers.internal_domains(orgs, "ME@MyCorp.com"))
+        self.assertIn("mycorp.com", customers.internal_domains(orgs, "ME@MyCorp.com"))
+
+    def test_no_orgs_and_no_user_is_empty(self):
+        # Nothing is internal by accident, and no config literal can make it so.
+        self.assertEqual(customers.internal_domains([], ""), frozenset())
 
 
 if __name__ == "__main__":

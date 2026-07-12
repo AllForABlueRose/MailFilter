@@ -547,3 +547,67 @@ def validate(template_text):
 def validate_expr(text):
     """Parse-check a single expression without evaluating. Raises TemplateError."""
     _parse_expr(text)
+
+
+# ----------------------------------------------------------------------------
+# Introspection: which variables does a template read?
+# ----------------------------------------------------------------------------
+
+def variables(text, namespace, is_expression=False, conditions=True):
+    """The distinct names ``text`` reads under ``namespace``, in first-seen order.
+
+    ``variables("Ref {{ upper(row.ref) }} for {{ row.qty }}", "row")`` ->
+    ``["ref", "qty"]``.
+
+    This walks the parsed tree rather than regex-ing the source, so it sees only
+    genuine reads: a name inside a string literal, or a different namespace, is not
+    reported. An unparseable template yields ``[]`` rather than raising -- a
+    half-typed template still needs its columns drawn.
+
+    ``conditions=False`` skips names read *only* to choose a branch
+    (``{% if row.uses_ftp %}``) and keeps those whose value is **printed** into the
+    output (``{{ row.ref }}``). That distinction is what separates a variable Press
+    must have from one it merely may have: a blank ``row.ref`` renders a hole in the
+    draft, while a blank ``row.uses_ftp`` simply means "no". Press uses the full list
+    for its columns and the printed-only list to decide what is missing.
+    """
+    try:
+        nodes = ([("expr", _parse_expr(text))] if is_expression
+                 else _parse_template(text or ""))
+    except TemplateError:
+        return []
+    found = []
+    _collect_nodes(nodes, namespace, found, conditions)
+    return found
+
+
+def _collect_nodes(nodes, namespace, found, conditions):
+    for node in nodes:
+        kind = node[0]
+        if kind == "expr":
+            _collect_expr(node[1], namespace, found)
+        elif kind == "if":
+            for cond, body in node[1]:
+                if cond is not None and conditions:
+                    _collect_expr(cond, namespace, found)
+                _collect_nodes(body, namespace, found, conditions)
+        # "text" reads nothing
+
+
+def _collect_expr(node, namespace, found):
+    kind = node[0]
+    if kind == "var":
+        parts = node[1]
+        # Only a dotted read INTO the namespace names a variable: `row.ref` yes,
+        # a bare `row` (or `sender.org`) no.
+        if len(parts) == 2 and parts[0] == namespace and parts[1] not in found:
+            found.append(parts[1])
+    elif kind == "call":
+        for arg in node[2]:
+            _collect_expr(arg, namespace, found)
+    elif kind == "bin":
+        _collect_expr(node[2], namespace, found)
+        _collect_expr(node[3], namespace, found)
+    elif kind == "not":
+        _collect_expr(node[1], namespace, found)
+    # "lit" reads nothing

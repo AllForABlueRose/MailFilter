@@ -441,9 +441,17 @@
         <option value="wind">Wind</option>
       </select>
 
-      <label for="orgCategory">Category <span class="auto-form-hint">(formality class — fill in later; colour follows the card colour, override below)</span></label>
+      <label for="orgCategory">Category
+        <span class="auto-form-hint">(formality class. Type to autocomplete; a category
+          that doesn't exist yet is created. Members of a <b>Root</b> org (your own
+          company — use it to declare another domain of your own) or a <b>Partner</b> org
+          count as <b>internal</b> in reply templates; their representatives do not.
+          Colour follows the card colour, override below.)</span></label>
       <div class="org-cat-field">
-        <input type="text" id="orgCategory" maxlength="60" placeholder="e.g. Customer, Internal, Partner" oninput="updateOrgPreview()">
+        <input type="text" id="orgCategory" maxlength="60" list="orgCategoryList"
+               autocomplete="off" placeholder="e.g. Customer, Partner, Vendor"
+               oninput="updateOrgPreview()">
+        <datalist id="orgCategoryList"></datalist>
         <input type="color" id="orgCategoryColor" value="#6366f1" title="Category label color" oninput="updateOrgPreview()">
       </div>
 
@@ -508,9 +516,9 @@
                 onclick="setComposerTab('preview')">Preview</button>
       </div>
 
-      <div id="compEditPane" class="comp-pane comp-edit-pane">
+      <div class="comp-pane comp-edit-pane">
         {% raw %}
-        <div class="comp-edit-row">
+        <div class="comp-edit-row" id="compEditRow">
           <input type="text" id="compName" class="comp-name" maxlength="80"
                  placeholder="Template name">
           <input type="color" id="compColor" class="comp-color" value="#0ea5e9"
@@ -519,25 +527,32 @@
           <button type="button" id="compDeleteBtn" class="auto-del-btn"
                   onclick="deleteComposerTemplate()" hidden>Delete</button>
         </div>
-        <div class="auto-form-hint">
+        <div class="auto-form-hint" id="compHint">
           <code>{{ ... }}</code> inserts a value; <code>{% if ... %}…{% else %}…{% endif %}</code>
           picks conditional text. Variables: <code>row.*</code> (your sheet columns),
           <code>sender.first_name</code>, <code>sender.is_internal</code>,
           <code>sender.org</code>, <code>mail.subject</code>. Drag a block in from the right.
         </div>
-        <textarea id="compBody" class="comp-body" oninput="onComposerBodyInput()"
-                  placeholder="Dear {{ default(sender.first_name, &quot;Sir/Madam&quot;) }},&#10;&#10;{% if row.uses_ftp %}Download it here: {{ ftp_link(row.file_name) }}&#10;{% else %}Please find {{ row.file_name }} attached.&#10;{% endif %}&#10;{{ if(sender.is_internal, &quot;Best regards,&quot;, &quot;Yours faithfully,&quot;) }}"></textarea>
 
-        <label for="compAttach" class="comp-attach-label">Attachment file name
+        <!-- ONE text area. Edit: the template source. Preview: the rendered reply,
+             read-only — you read the result where you wrote it. -->
+        <textarea id="compBody" class="comp-body" oninput="onComposerBodyInput()"></textarea>
+
+        <label for="compAttach" class="comp-attach-label" id="compAttachLabel">Attachment file name
           <span class="auto-form-hint">(expression; blank = use the row's File Name column)</span></label>
         <input type="text" id="compAttach" class="comp-attach" maxlength="500"
                oninput="onComposerBodyInput()"
                placeholder='e.g. upper(row.ref) + &quot;.pdf&quot;'>
         <div id="compFormError" class="bulk-tmpl-error" hidden></div>
         {% endraw %}
-      </div>
 
-      <div id="compPreviewPane" class="comp-pane comp-preview-pane" hidden></div>
+        <!-- The slim info strip. No body here — that is in the text area above. -->
+        <div id="compInfo" class="comp-info">
+          <div id="compInfoMeta" class="comp-info-block"></div>
+          <div class="comp-info-label">Row data used</div>
+          <div id="compInfoRow" class="comp-info-block comp-info-rowdata"></div>
+        </div>
+      </div>
     </main>
 
     <!-- RIGHT: the draggable function palette. -->
@@ -553,54 +568,70 @@
 <section id="view-press" class="view view-press view-hidden" data-view="press">
   <div class="auto-bar">
     <h2 class="auto-title">Press</h2>
-    <span id="pressSharedInfo" class="bulk-shared"></span>
-  </div>
-  <p class="cust-hint">
-    Upload an Excel (.xlsx) sheet of replies. Each row is matched to a mail in the
-    shared mailbox (by subject + datetime + sender) and turned into a
-    <b>reply-all draft</b> sent from the shared mailbox and CC'ing it. Drafts are
-    created for your review — <b>nothing is ever sent</b>. Templates are authored in
-    <b>Composer</b>, where you can see what one renders to before pressing a whole sheet
-    through it.
-  </p>
-
-  <div class="bulk-controls">
-    <div class="bulk-tmpl-row">
-      <label for="pressTemplateSelect">Reply template</label>
-      <select id="pressTemplateSelect" onchange="onPressTemplateChange()">
-        <option value="">— select a template —</option>
+    <div class="press-mailbox">
+      <select id="pressMailboxSelect" onchange="onPressMailboxSelect()" title="The mailbox drafts are sent on behalf of">
+        <option value="personal">Personal mailbox</option>
+        <option value="shared">Shared mailbox</option>
       </select>
+      <span id="pressMailboxStatus" class="press-mbx-status"></span>
+      <button type="button" class="flip-btn" id="pressMailboxEdit"
+              onclick="openPressMailboxPrompt()">Set…</button>
+      <label class="press-cc" title="Add the selected mailbox to the reply's Cc">
+        <input type="checkbox" id="pressCc" onchange="onPressCcToggle()"> Cc it
+      </label>
     </div>
-    <div id="pressTemplateError" class="bulk-tmpl-error" hidden></div>
+  </div>
 
-    <div class="bulk-file-row">
-      <input type="file" id="pressFile" accept=".xlsx" onchange="onPressFileChange()">
-      <button type="button" class="auto-new-btn" id="pressPreviewBtn"
-              onclick="pressPreview()" disabled>Preview</button>
-      <button type="button" class="auto-save-btn" id="pressCreateBtn"
-              onclick="pressCreateDrafts()" disabled>Create drafts</button>
+  <div id="pressMailboxPrompt" class="press-prompt" hidden>
+    <label for="pressMailboxInput" id="pressPromptLabel">Your mailbox address</label>
+    <input type="text" id="pressMailboxInput" placeholder="you@example.com"
+           onkeydown="if(event.key==='Enter'){savePressMailbox();}">
+    <button type="button" class="auto-save-btn" onclick="savePressMailbox()">Verify</button>
+    <button type="button" class="flip-btn" onclick="closePressMailboxPrompt()">Cancel</button>
+    <div id="pressPromptHint" class="auto-form-hint"></div>
+  </div>
+  <div id="pressMailboxError" class="bulk-tmpl-error" hidden></div>
+
+  <div class="press-controls">
+    <div class="press-row">
+      <button type="button" id="pressTemplateToggle" class="comp-square press-square-toggle"
+              onclick="togglePressTemplateBar()" title="Choose a reply template">
+        <span id="pressTemplateInitials" class="comp-square-initials">＋</span>
+        <span id="pressTemplateName" class="comp-square-label">Template</span>
+      </button>
+      <div id="pressTemplateBar" class="press-template-bar" hidden></div>
+      <button type="button" class="flip-btn" id="pressApplyAll"
+              onclick="pressApplyToAll()" hidden>Apply to all</button>
+      <div id="pressFilters" class="comp-filters press-filters"></div>
     </div>
-    <div id="pressSummary" class="bulk-summary"></div>
+
+    <div class="press-row">
+      <button type="button" class="flip-btn" onclick="pressDownloadForm()"
+              title="Write a fill-in Excel form into today's workspace folder">⬇ Download Excel Template Form</button>
+      <label class="flip-btn press-upload" title="Upload the filled-in form">
+        ⬆ Upload File
+        <input type="file" id="pressFile" accept=".xlsx" onchange="pressUploadForm()" hidden>
+      </label>
+      <span id="pressSummary" class="bulk-summary"></span>
+      <button type="button" id="pressCommit" class="press-commit" disabled
+              onclick="pressCommit()" oncontextmenu="pressDisarm(event)"
+              title="Press once to mark every computed item, again to create the drafts. Right-click to clear.">
+        Create drafts
+      </button>
+    </div>
     <div id="pressStatus" class="tray-status"></div>
   </div>
 
   <div class="bulk-table-wrap">
-    <table class="directory-table bulk-table">
-      <thead>
-        <tr>
-          <th><input type="checkbox" id="pressSelectAll" onclick="togglePressSelectAll()"></th>
-          <th>Row</th>
-          <th>Status</th>
-          <th>Recipients</th>
-          <th>Subject</th>
-          <th>Attachment / FTP</th>
-          <th>Body &amp; warnings</th>
-        </tr>
-      </thead>
+    <table class="directory-table bulk-table press-table">
+      <thead id="pressHead"></thead>
       <tbody id="pressRows">
-        <tr><td colspan="7" class="bulk-empty">Pick a template and a spreadsheet, then Preview.</td></tr>
+        <tr><td colspan="5" class="bulk-empty">Load mail items with the emoji filters above, then give them a template.</td></tr>
       </tbody>
     </table>
+    <div id="pressMore" class="press-more" hidden>
+      <button type="button" class="flip-btn" onclick="loadMorePressMails()">Load 10 more</button>
+    </div>
   </div>
 </section>
 

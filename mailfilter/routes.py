@@ -16,6 +16,7 @@ from flask import (
     request,
     send_file,
 )
+from werkzeug.exceptions import HTTPException
 
 import config
 
@@ -27,9 +28,10 @@ from . import (
     customers,
     dedup,
     draft_ops,
+    mail_picker,
     outlook,
     password_detect,
-    shared_mailbox,
+    press,
     spreadsheet,
     unlock_ops,
     util,
@@ -151,8 +153,20 @@ def refresh_then_scan(store, password_settings, vault_store, customer_store,
 def create_blueprint(store, settings, tag_store, template_store, automation_store,
                      customer_store, compose_template_store, password_settings,
                      experimental_store, customer_match_store, vault_store,
-                     calendar_store):
+                     calendar_store, mailbox_store, category_store):
     bp = Blueprint("mailfilter", __name__)
+
+    @bp.app_errorhandler(HTTPException)
+    def _api_error_as_json(e):
+        """An aborted /api/ call answers with JSON, not Flask's HTML error page.
+
+        The frontend reads ``description`` to tell the user *why* (an unverified
+        mailbox, an unreachable Outlook, a bad upload). Without this it would parse an
+        HTML page as JSON and surface a syntax error instead of the reason.
+        """
+        if not request.path.startswith("/api/"):
+            return e
+        return jsonify({"error": e.name, "description": e.description}), e.code
 
     def view_model(mail, query, resolve_org=None, hide_safe_links=False):
         view = to_view_model(mail, query.main, query.optional,
@@ -167,6 +181,17 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         org = resolve_org(mail) if resolve_org else None
         view["org_labels"] = [customers.org_label(org)] if org else []
         return view
+
+    def _internal_domains():
+        """The domains ``sender.is_internal`` is true for, built once per request.
+
+        The user's own domain comes from the mailbox they **verified** against Outlook
+        (an unverified one proves nothing about who you are, so it is not used); the
+        rest come from the Partner organizations in Customer Management. See
+        ``customers.internal_domains``."""
+        personal = mailbox_store.get("personal") or {}
+        own = personal["address"] if personal.get("status") == "verified" else ""
+        return customers.internal_domains(customer_store.snapshot(), own)
 
     def _mail_org_resolver():
         """The per-request mail->org resolver: the Brute Force keyword tier is active
@@ -777,7 +802,9 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             abort(400, description="expected a JSON object")
-        return jsonify(customer_store.create(data))
+        org = customer_store.create(data)
+        category_store.add(org.get("category", ""))   # a typed category creates itself
+        return jsonify(org)
 
     @bp.put("/api/organizations/<oid>")
     def update_organization(oid):
@@ -787,7 +814,34 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         updated = customer_store.update(oid, data)
         if updated is None:
             abort(404)
+        # Typing a category that does not exist is all it takes to create it: the org is
+        # saved with it, and it joins the selectable list from now on.
+        category_store.add(updated.get("category", ""))
         return jsonify(updated)
+
+    # ----- Organization categories (the picker behind the Category field) -----
+
+    @bp.get("/api/categories")
+    def list_categories():
+        return jsonify({"categories": category_store.snapshot(),
+                        "partner": config.ORG_PARTNER_CATEGORY})
+
+    @bp.post("/api/categories")
+    def add_category():
+        """Create one category. Also reachable implicitly by typing it on an org."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        created = category_store.add(data.get("name", ""))
+        return jsonify({"categories": category_store.snapshot(), "created": created})
+
+    @bp.put("/api/categories")
+    def replace_categories():
+        """Replace the whole list (reorder / prune)."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        return jsonify({"categories": category_store.update(data.get("categories"))})
 
     @bp.delete("/api/organizations/<oid>")
     def delete_organization(oid):
@@ -957,50 +1011,50 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
 
     @bp.get("/api/composer/blocks")
     def composer_blocks():
-        """The draggable function palette, each block's demo output rendered live
-        through the DSL (so it cannot advertise an output the DSL wouldn't produce)."""
+        """The draggable function palette.
+
+        Every block carries its demo **cases** -- the same snippet against different
+        inputs, each rendered live through the DSL (so the palette cannot advertise an
+        output the DSL wouldn't produce). The frontend cycles through them slowly."""
         return jsonify({"blocks": composer.render_blocks(),
-                        "demo_context": composer.DEMO_CONTEXT})
+                        "demo_context": composer.DEMO_CONTEXT,
+                        "cycle_ms": config.COMPOSER_BLOCK_CYCLE_MS})
 
     @bp.get("/api/composer/samples")
     def composer_samples():
         """The 10 example mails and the sheet row assigned to each."""
-        return jsonify({"samples": composer.SAMPLES, "filters": composer.FILTERS})
+        return jsonify({"samples": composer.SAMPLES, "filters": mail_picker.FILTERS})
 
     @bp.get("/api/composer/mails")
     def composer_mails():
         """One page of cache mail for the picker (the app's only paged list).
 
-        ``?filter=`` is one of composer.FILTER_IDS, ``?offset=``/``?limit=`` page
-        through the filtered set newest-first. Returns slim picker cards -- raw
-        strings the frontend inserts as DOM text, not presenter view models."""
+        Shared by Composer's left column (pick ONE mail to preview against) and
+        Press's worklist loader (load MANY). ``?filter=`` is one of
+        ``mail_picker.FILTER_IDS``; ``?offset=``/``?limit=`` page through the filtered
+        set newest-first. Returns slim picker cards -- raw strings the frontend inserts
+        as DOM text, not presenter view models."""
         filter_id = request.args.get("filter", "all")
-        if filter_id not in composer.FILTER_IDS:
+        if filter_id not in mail_picker.FILTER_IDS:
             filter_id = "all"
         offset = _int_arg("offset", 0)
         limit = min(_int_arg("limit", config.COMPOSER_PAGE_SIZE),
                     config.COMPOSER_PAGE_SIZE_MAX)
 
         resolve_org = _mail_org_resolver()
-        result = composer.page(store.snapshot(), filter_id, offset, limit,
-                               resolve_org, tag_store.tags_for)
+        result = mail_picker.page(store.snapshot(), filter_id, offset, limit,
+                                  resolve_org, tag_store.tags_for)
         cards = []
         for mail in result["mails"]:
             org = resolve_org(mail)
-            cards.append({
-                "id": mail.get("id", ""),
-                "subject": str(mail.get("subject", "")),
-                "sender": {"name": str(mail.get("sender", "")),
-                           "email": str(mail.get("sender_email", ""))},
-                "received": str(mail.get("received", "")),
-                "has_attachments": bool(mail.get("_has_attachments")),
-                "has_links": bool(mail.get("_has_links")),
-                "has_password": bool(mail.get("_has_password")),
-                "tags": tag_store.tags_for(mail.get("id", "")),
-                "org_labels": [customers.org_label(org)] if org else [],
-            })
+            cards.append(mail_picker.card(
+                mail,
+                org_label=customers.org_label(org) if org else None,
+                tags=tag_store.tags_for(mail.get("id", "")),
+            ))
         return jsonify({"mails": cards, "total": result["total"],
-                        "has_more": result["has_more"], "offset": offset})
+                        "has_more": result["has_more"], "offset": offset,
+                        "filters": mail_picker.FILTERS})
 
     @bp.post("/api/composer/preview")
     def composer_preview():
@@ -1041,11 +1095,12 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             mail = next((m for m in store.snapshot() if m.get("id") == ref), None)
             if mail is None:
                 abort(404, description="unknown mail")
-            row = composer.row_for_mail(mail)
+            row = bulk_compose.row_for_mail(mail)
         else:
             abort(400, description="source must be 'sample' or 'mail'")
 
-        plan = composer.preview(template, mail, row, customer_store.snapshot())
+        plan = composer.preview(template, mail, row, customer_store.snapshot(),
+                                internal=_internal_domains())
         return jsonify({"plan": plan, "row": row, "template_error": template.get("error", "")})
 
     def _int_arg(name, default):
@@ -1054,13 +1109,11 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         except (TypeError, ValueError):
             return default
 
-    # ----- Press (reply-draft generation from a spreadsheet) -----
+    # ----- Reply templates (authored in Composer, run by Press) -----
 
     @bp.get("/api/compose-templates")
     def list_compose_templates():
-        return jsonify({"templates": compose_template_store.snapshot(),
-                        "shared_mailbox": config.SHARED_MAILBOX_ADDRESS,
-                        "mock_mode": config.BULK_MOCK_MODE})
+        return jsonify({"templates": compose_template_store.snapshot()})
 
     @bp.post("/api/compose-templates")
     def create_compose_template():
@@ -1084,58 +1137,219 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         compose_template_store.delete(tid)
         return jsonify({"templates": compose_template_store.snapshot()})
 
-    def _plan_from_request():
-        """Shared by preview and commit: parse the uploaded sheet, load the chosen
-        template, read the shared inbox, and plan every row. Aborts (4xx/5xx) on a
-        bad upload / unknown template / unreachable Outlook. Returns
-        ``(rows, plan_result, dropped)``."""
+    # ----- Press (the reply-draft worklist; the app's only mailbox WRITE) -----
+
+    def _press_context():
+        """The snapshots a compute needs: mail by id, templates by id, orgs, CC, and
+        the internal-domain set sender.is_internal is decided by."""
+        mails_by_id = {m["id"]: m for m in store.snapshot()}
+        templates_by_id = {t["id"]: t for t in compose_template_store.snapshot()}
+        orgs = customer_store.snapshot()
+        state = mailbox_store.snapshot()
+        cc = mailbox_store.selected_address() if state["cc_enabled"] else ""
+        return mails_by_id, templates_by_id, orgs, cc, _internal_domains()
+
+    def _press_items(data):
+        """The worklist from a request body, capped. ``[{mail_id, template_id, row}]``."""
+        items = data.get("items")
+        if not isinstance(items, list):
+            abort(400, description="expected an 'items' array")
+        if len(items) > config.PRESS_MAX_ITEMS:
+            abort(400, description=f"at most {config.PRESS_MAX_ITEMS} mail items at a time")
+        return [i for i in items if isinstance(i, dict)]
+
+    @bp.get("/api/press/state")
+    def press_state():
+        """Everything Press needs on entry: the mailboxes and whether they are proved,
+        whether Outlook is reachable at all, the templates, and the picker's filters.
+
+        A `pending` mailbox (named while Outlook was down) is re-checked here, so simply
+        opening Press once Outlook is running completes the deferred verification."""
+        available = outlook.is_available()
+        if available:
+            for kind in mailbox_store.pending_kinds():
+                box = mailbox_store.get(kind)
+                _verify_mailbox(kind, box["address"])
+        return jsonify({
+            "mailbox": mailbox_store.snapshot(),
+            "outlook_available": available,
+            "ready": mailbox_store.is_ready(),
+            "templates": compose_template_store.snapshot(),
+            "filters": mail_picker.FILTERS,
+        })
+
+    def _verify_mailbox(kind, address):
+        """Prove one mailbox and record the verdict. Never raises.
+
+        personal -> it must BE the logged-in Outlook profile's address (owning a
+                    mailbox is not the same as being able to open one).
+        shared   -> the profile must be able to OPEN it.
+        Outlook unreachable -> `pending`: the check is deferred, not failed, and
+        Press keeps its draft controls locked until it completes.
+        """
+        try:
+            if kind == "personal":
+                mine = outlook.profile_address()
+                if not mine:
+                    return mailbox_store.set_address(
+                        kind, address, "pending",
+                        "Outlook did not report an address for the current profile")
+                if mine.strip().lower() != address.strip().lower():
+                    # Rejected: drop the address so the user is asked again.
+                    return mailbox_store.set_address(
+                        kind, "", "unset",
+                        f"that is not this Outlook profile's mailbox (it is {mine})")
+                return mailbox_store.set_address(kind, address, "verified")
+            outlook.check_mailbox_access(address)
+            return mailbox_store.set_address(kind, address, "verified")
+        except outlook.OutlookUnavailableError as e:
+            # Cannot reach Outlook -> defer. Cannot access the mailbox -> reject.
+            if outlook.is_available():
+                return mailbox_store.set_address(kind, "", "unset", str(e))
+            return mailbox_store.set_address(kind, address, "pending", str(e))
+
+    @bp.post("/api/press/mailbox")
+    def press_mailbox():
+        """Record + verify a mailbox. ``{kind, address}`` -> the resulting mailbox."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        kind = str(data.get("kind", ""))
+        if kind not in config.MAILBOX_KINDS:
+            abort(400, description="kind must be 'personal' or 'shared'")
+        address = str(data.get("address", "")).strip()
+        if not address:
+            box = mailbox_store.set_address(kind, "", "unset")
+        else:
+            box = _verify_mailbox(kind, address)
+        return jsonify({"mailbox": box, "state": mailbox_store.snapshot(),
+                        "ready": mailbox_store.is_ready()})
+
+    @bp.put("/api/press/settings")
+    def press_settings():
+        """Which mailbox is selected, and whether it is CC'd. Cannot set an address."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        state = mailbox_store.update(data)
+        return jsonify({"state": state, "ready": mailbox_store.is_ready()})
+
+    @bp.post("/api/press/compute")
+    def press_compute():
+        """Compute every worklist item -> empty / failed(+reasons) / ok(+plan).
+
+        A pure dry-run: writes no draft, no audit log, no cache change. This is what
+        paints the table's status dots and their hover previews."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        items = _press_items(data)
+        mails_by_id, templates_by_id, orgs, cc, internal = _press_context()
+        results = press.compute(items, mails_by_id, templates_by_id, orgs, cc,
+                                internal)
+        templates = [templates_by_id[i["template_id"]] for i in items
+                     if i.get("template_id") in templates_by_id]
+        return jsonify({
+            "results": results,
+            "columns": press.union_variables(templates),
+            "ready": mailbox_store.is_ready(),
+        })
+
+    @bp.post("/api/press/form")
+    def press_form():
+        """Write the fill-in Excel form into today's workspace folder.
+
+        Columns: [Entry ID] + the report's columns + exactly the ``row.*`` variables the
+        chosen template reads. Pre-filled with the loaded mail items (and whatever the
+        user has already typed), so the user only completes the blanks and uploads it
+        back. With no mail loaded the Entry ID column is omitted -- the user could not
+        supply one -- and the upload falls back to a best-effort match."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        template = compose_template_store.get(data.get("template_id"))
+        mail_ids = [str(i) for i in (data.get("mail_ids") or [])]
+        by_id = {m["id"]: m for m in store.snapshot()}
+        mails = [by_id[i] for i in mail_ids if i in by_id]
+
+        resolve_org = _mail_org_resolver()
+        for mail in mails:
+            org = resolve_org(mail)
+            mail["_org_name"] = org["name"] if org else ""
+
+        columns = press.form_columns(template, with_entry_id=bool(mails))
+        rows_by_id = {str(k): v for k, v in (data.get("rows") or {}).items()
+                      if isinstance(v, dict)}
+        rows = press.form_rows(mails, template, columns, rows_by_id)
+
+        folder = config.WORKSPACE_DIR / datetime.now().strftime("%Y-%m-%d")
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / press.form_filename()
+        try:
+            spreadsheet.write_xlsx(target, columns, rows)
+        except spreadsheet.SpreadsheetError as e:
+            abort(503, description=str(e))
+        return jsonify({"folder": str(folder), "name": target.name,
+                        "columns": columns, "rows": len(rows)})
+
+    @bp.post("/api/press/upload")
+    def press_upload():
+        """Read a filled-in form back and bind each row to a loaded mail item.
+
+        Multipart: ``file`` (.xlsx) + ``mail_ids`` (JSON array of the loaded items).
+        Returns the row data per mail id, plus the rows that could not be bound (and
+        why) rather than guessing at them."""
         upload = request.files.get("file")
         if upload is None:
             abort(400, description="no spreadsheet uploaded")
-        template = compose_template_store.get(request.form.get("template_id"))
-        if template is None:
-            abort(400, description="unknown or missing template")
         try:
             _headers, rows, dropped = spreadsheet.parse_xlsx(upload.read())
         except spreadsheet.SpreadsheetError as e:
             abort(400, description=str(e))
+
+        mail_ids = _json_id_list(request.form.get("mail_ids"))
+        by_id = {m["id"]: m for m in store.snapshot()}
+        mails = [by_id[str(i)] for i in mail_ids if str(i) in by_id]
+
+        bound, unbound = press.bind_upload(rows, mails)
+        return jsonify({"bound": bound, "unbound": unbound,
+                        "dropped": dropped, "rows": len(rows)})
+
+    @bp.post("/api/press/create-drafts")
+    def press_create_drafts():
+        """Commit: recompute every item server-side and draft the selected ones.
+
+        The client sends what it *wants* drafted; the server decides what *is*. Plans
+        are recomputed here from the cache + the stored template, so the client can
+        never inject draft content. Refused outright unless the selected mailbox has
+        been proved against Outlook. Draft-only -- it never sends. Writes a CSV audit
+        log of what was created into the dated workspace folder."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+        if not mailbox_store.is_ready():
+            abort(409, description="the selected mailbox has not been verified against "
+                                   "Outlook yet")
+
+        items = _press_items(data)
+        mails_by_id, templates_by_id, orgs, cc, internal = _press_context()
+        results = press.compute(items, mails_by_id, templates_by_id, orgs, cc,
+                                internal)
+
+        # Only items the SERVER computed as ok, and only those the user ticked.
+        wanted = {str(i) for i in (data.get("selected") or [])}
+        to_create = [r["plan"] for r in results
+                     if r["status"] == press.STATUS_OK and r["mail_id"] in wanted]
+
+        sender = mailbox_store.selected_address()
         try:
-            shared = shared_mailbox.read_inbox()
+            created = draft_ops.create_drafts(to_create, sender, cc)
         except outlook.OutlookUnavailableError as e:
             abort(503, description=str(e))
-        orgs = customer_store.snapshot()
-        result = bulk_compose.plan_all(rows, shared, template, orgs)
-        return rows, result, dropped
 
-    @bp.post("/api/bulk/preview")
-    def bulk_preview():
-        """Dry-run: generate planned drafts from the sheet and return them.
-
-        Multipart form: ``file`` (the .xlsx) + ``template_id``. Writes NOTHING --
-        no drafts, no audit log. The response drives the review table."""
-        _rows, result, dropped = _plan_from_request()
-        return jsonify({**result, "dropped": dropped})
-
-    @bp.post("/api/bulk/create-drafts")
-    def bulk_create_drafts():
-        """Commit: recompute plans server-side and create the selected drafts.
-
-        Multipart form: ``file`` + ``template_id`` + optional ``indices`` (a JSON
-        array of row indices to include; absent = every ready row). Plans are
-        recomputed here rather than trusted from the client, so the server alone
-        decides what is created. Draft-only -- never sends. Writes a CSV audit log
-        of what was created to the dated workspace folder."""
-        _rows, result, _dropped = _plan_from_request()
-
-        selected = _selected_indices(request.form.get("indices"))
-        to_create = [p for p in result["plans"]
-                     if p["status"] == "ready"
-                     and (selected is None or p["row_index"] in selected)]
-
-        results = draft_ops.create_drafts(to_create)
-        audit = _write_bulk_audit(to_create, results)
-        created = sum(1 for r in results if r["status"] == "created")
-        return jsonify({"results": results, "created": created,
+        audit = _write_press_audit(to_create, created, sender)
+        ok = sum(1 for r in created if r["status"] == "created")
+        return jsonify({"results": created, "created": ok,
                         "requested": len(to_create), "audit": audit})
 
     # ----- Smart Password Detection -----
@@ -1195,42 +1409,43 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     return bp
 
 
-def _selected_indices(raw):
-    """Parse the optional ``indices`` form field into a set, or None for 'all'."""
+def _json_id_list(raw):
+    """Parse a JSON array of mail ids (Outlook EntryIDs -- strings, never ints)."""
     if not raw:
-        return None
+        return []
     try:
         value = json.loads(raw)
     except ValueError:
-        return None
+        return []
     if not isinstance(value, list):
-        return None
-    return {int(i) for i in value if isinstance(i, (int, float))}
+        return []
+    return [str(i) for i in value if isinstance(i, str)]
 
 
-def _write_bulk_audit(plans, results):
-    """Write a CSV record of a commit into the dated workspace folder.
+def _write_press_audit(plans, results, sender):
+    """Write a CSV record of a Press commit into the dated workspace folder.
 
-    Columns: row, status, subject, to, cc, attachment/ftp, detail. Returns the
-    file path, or "" if there was nothing to record."""
+    Columns: mail id, status, subject, from, to, cc, attachment/ftp, detail. Returns
+    the file path, or "" if there was nothing to record."""
     if not plans:
         return ""
-    by_index = {p["row_index"]: p for p in plans}
+    by_id = {p["mail_id"]: p for p in plans}
     now = datetime.now()
     folder = config.WORKSPACE_DIR / now.strftime("%Y-%m-%d")
     folder.mkdir(parents=True, exist_ok=True)
     target = workspace_ops.unique_path(
-        folder, f"bulk_drafts_{now.strftime('%Y-%m-%d_%H%M%S')}.csv", 0)
+        folder, f"press_drafts_{now.strftime('%Y-%m-%d_%H%M%S')}.csv", 0)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["row", "status", "subject", "to", "cc", "attachment/ftp", "detail"])
+    writer.writerow(["mail id", "status", "subject", "from", "to", "cc",
+                     "attachment/ftp", "detail"])
     for r in results:
-        p = by_index.get(r["row_index"], {})
+        p = by_id.get(r.get("mail_id"), {})
         att = p.get("ftp_link") if p.get("uses_ftp") else (
             (p.get("attachment") or {}).get("name", ""))
         writer.writerow([
-            r["row_index"], r["status"], p.get("subject", ""),
+            r.get("mail_id", ""), r["status"], p.get("subject", ""), sender,
             "; ".join(p.get("to", [])), "; ".join(p.get("cc", [])),
             att or "", r.get("detail", ""),
         ])

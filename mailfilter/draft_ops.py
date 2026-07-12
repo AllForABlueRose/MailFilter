@@ -1,100 +1,62 @@
-"""Create reply DRAFTS in the shared mailbox -- the app's only mailbox write.
+"""Create reply DRAFTS in Outlook -- the app's only mailbox write.
 
-This is the sole module that mutates a mailbox, and it is deliberately the
-narrowest mutation possible: it creates *drafts* and **never sends**. The live
-path uses Outlook's ``ReplyAll`` on the matched original (so threading and the
-original recipients are correct), sets ``SentOnBehalfOfName`` to the shared
-mailbox, ensures the shared mailbox is CC'd, injects the rendered template above
-the quoted history, attaches the file from the file server (unless the row is an
-FTP row), and calls ``Save()``. A human reviews and sends from Outlook, exactly
-as today -- the app preserves that authorization gate.
+This is the sole module that mutates a mailbox, and it is deliberately the narrowest
+mutation possible: it creates *drafts* and **never sends**. For each computed plan it
+runs Outlook's ``ReplyAll`` on the original mail (so threading and the original
+recipients are correct), sets ``SentOnBehalfOfName`` to the mailbox Press is drafting
+from, optionally CC's that mailbox, injects the rendered template above the quoted
+history, attaches the file from the file server (unless the item is an FTP item), and
+calls ``Save()``. A human reviews and sends from Outlook -- the app preserves that
+authorization gate.
 
-``create_drafts`` dispatches on ``config.BULK_MOCK_MODE``: the mock branch writes
-each draft as a JSON file under ``config.MOCK_DRAFTS_DIR`` (so a run is
-inspectable without Outlook); the live branch talks COM. Only the live branch
-imports pywin32 (through ``outlook``, lazily).
+The mail replied to is the ordinary cached mail: its Outlook ``EntryID`` is the cache's
+``id``, and ``GetItemFromID(entry_id)`` re-opens it, the same call ``fetch_attachment``
+makes. ``store_id`` is honoured when a plan carries one but is not required.
 
-Adding a real *send* here would be an "Always ask" change (see CLAUDE.md) -- do
-not. Dependency direction: draft_ops -> outlook (COM), config.
+There is **no mock**. Drafting requires classic Outlook over COM, and the mailbox
+drafted from must have been proved first (``mailbox_store`` + ``outlook.profile_address``
+/ ``check_mailbox_access``). Tests drive this module with stubbed COM objects.
+
+Adding a real *send* here would be an "Always ask" change (see CLAUDE.md) -- do not.
+Dependency direction: draft_ops -> outlook (COM), config.
 """
 
-import json
 import logging
-from datetime import datetime
-from pathlib import Path
 
-import config
-
-from . import outlook, util
+from . import outlook
 
 log = logging.getLogger(__name__)
 
 OL_CC = 2  # OlMailRecipientType.olCC
 
 
-def create_drafts(plans):
-    """Create a draft for each *ready* plan in ``plans``; never sends.
+def create_drafts(plans, sender_address, cc_address=""):
+    """Create a draft for each *ready* plan; never sends.
 
-    Non-ready plans are skipped defensively (the caller already filters). Returns
-    a list of result dicts: ``{row_index, status: "created"|"skipped"|"error",
-    detail}``.
+    ``sender_address`` is the (already verified) mailbox the drafts are sent on behalf
+    of. ``cc_address`` is added to the reply's CC when non-empty -- Press passes the
+    same mailbox, or "" when the user has turned the CC toggle off.
+
+    Non-ready plans are skipped defensively (the caller already filters, and the
+    route recomputes them server-side). Returns a list of
+    ``{mail_id, row_index, status: "created"|"skipped"|"error", detail}``.
     """
     ready = [p for p in plans if p.get("status") == "ready"]
-    skipped = [{"row_index": p.get("row_index"), "status": "skipped",
-                "detail": "not ready"} for p in plans if p.get("status") != "ready"]
+    skipped = [{"mail_id": p.get("mail_id", ""), "row_index": p.get("row_index"),
+                "status": "skipped", "detail": "not ready"}
+               for p in plans if p.get("status") != "ready"]
     if not ready:
         return skipped
-    created = _mock_create(ready) if config.BULK_MOCK_MODE else _com_create(ready)
-    return created + skipped
+    if not (sender_address or "").strip():
+        # Belt and braces: the route refuses this already. A draft must never be
+        # created from an unproved mailbox.
+        return [{"mail_id": p.get("mail_id", ""), "row_index": p.get("row_index"),
+                 "status": "error", "detail": "no verified mailbox selected"}
+                for p in ready] + skipped
+    return _com_create(ready, sender_address, cc_address) + skipped
 
 
-# ----------------------------------------------------------------------------
-# Mock backend
-# ----------------------------------------------------------------------------
-
-def _mock_create(plans):
-    folder = Path(config.MOCK_DRAFTS_DIR)
-    folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results = []
-    for plan in plans:
-        draft = _draft_document(plan)
-        name = util.safe_filename(f"draft_{stamp}_row{plan['row_index']}.json",
-                                  f"draft_row{plan['row_index']}.json")
-        target = folder / name
-        target.write_text(json.dumps(draft, ensure_ascii=False, indent=2),
-                          encoding="utf-8")
-        results.append({"row_index": plan["row_index"], "status": "created",
-                        "detail": str(target)})
-    log.info("Mock: wrote %d draft(s) to %s", len(results), folder)
-    return results
-
-
-def _draft_document(plan):
-    """The inspectable representation of the draft a live run would create."""
-    attachment = plan.get("attachment")
-    return {
-        "from": config.SHARED_MAILBOX_ADDRESS,
-        "to": plan.get("to", []),
-        "cc": plan.get("cc", []),
-        "subject": plan.get("subject", ""),
-        "body": plan.get("body", ""),
-        "in_reply_to": plan.get("mail_id", ""),
-        "uses_ftp": plan.get("uses_ftp", False),
-        "ftp_link": plan.get("ftp_link", ""),
-        "attachment": None if plan.get("uses_ftp") or not attachment else {
-            "name": attachment.get("name", ""),
-            "path": attachment.get("path", ""),
-        },
-        "note": "MOCK draft (not created in Outlook); never sent.",
-    }
-
-
-# ----------------------------------------------------------------------------
-# Live COM backend (verified on the Outlook host before BULK_MOCK_MODE is off)
-# ----------------------------------------------------------------------------
-
-def _com_create(plans):
+def _com_create(plans, sender_address, cc_address):
     pythoncom, pywintypes, win32com = outlook._import_pywin32()
     pythoncom.CoInitialize()
     try:
@@ -103,19 +65,21 @@ def _com_create(plans):
         results = []
         for plan in plans:
             try:
-                detail = _com_create_one(namespace, plan)
-                results.append({"row_index": plan["row_index"],
+                detail = _com_create_one(namespace, plan, sender_address, cc_address)
+                results.append({"mail_id": plan.get("mail_id", ""),
+                                "row_index": plan.get("row_index"),
                                 "status": "created", "detail": detail})
             except Exception as e:
-                log.exception("Draft creation failed for row %s", plan.get("row_index"))
-                results.append({"row_index": plan["row_index"],
+                log.exception("Draft creation failed for mail %s", plan.get("mail_id"))
+                results.append({"mail_id": plan.get("mail_id", ""),
+                                "row_index": plan.get("row_index"),
                                 "status": "error", "detail": str(e)})
         return results
     finally:
         pythoncom.CoUninitialize()
 
 
-def _com_create_one(namespace, plan):
+def _com_create_one(namespace, plan, sender_address, cc_address):
     store_id = plan.get("store_id") or None
     if store_id:
         item = namespace.GetItemFromID(plan["mail_id"], store_id)
@@ -124,19 +88,18 @@ def _com_create_one(namespace, plan):
 
     reply = item.ReplyAll()  # populates To/CC + threading from the original
     try:
-        reply.SentOnBehalfOfName = config.SHARED_MAILBOX_ADDRESS
+        reply.SentOnBehalfOfName = sender_address
     except Exception:
         log.warning("Could not set SentOnBehalfOfName; draft will be from the "
                     "default account")
 
-    # Ensure the shared mailbox is CC'd (ReplyAll may or may not include it).
-    cc = namespace.CreateRecipient(config.SHARED_MAILBOX_ADDRESS)
-    cc.Type = OL_CC
-    cc.Resolve()
-    reply.Recipients.Add(config.SHARED_MAILBOX_ADDRESS).Type = OL_CC
-    reply.Recipients.ResolveAll()
+    # CC the drafting mailbox, unless the user turned the CC toggle off.
+    cc_address = (cc_address or "").strip()
+    if cc_address:
+        reply.Recipients.Add(cc_address).Type = OL_CC
+        reply.Recipients.ResolveAll()
 
-    # Inject the rendered template above the quoted history (plain body for now).
+    # Inject the rendered template above the quoted history (plain body).
     reply.Body = plan.get("body", "") + "\n\n" + str(getattr(reply, "Body", ""))
 
     attachment = plan.get("attachment")

@@ -88,14 +88,24 @@ function composerTemplate(){
 function selectComposerTemplate(id){
     composerTemplateId = id;
     const t = composerTemplate();
+    composerSource = t ? t.body : '';
     document.getElementById('compName').value = t ? t.name : '';
-    document.getElementById('compBody').value = t ? t.body : '';
     document.getElementById('compAttach').value = t ? (t.attachment_expr || '') : '';
     document.getElementById('compColor').value = t ? (t.color || '#0ea5e9') : '#0ea5e9';
     document.getElementById('compDeleteBtn').hidden = !t;
+    if(composerTab === 'edit'){
+        document.getElementById('compBody').value = composerSource;
+    }
     setComposerFormError(t && t.error ? t.error : '');
     renderComposerTemplateBar();
     schedulePreview();
+}
+
+// The template's source, wherever we are. In Preview the text area holds the RENDERED
+// reply, so the source must be kept here rather than read back off it.
+function composerBodyText(){
+    return composerTab === 'edit'
+        ? document.getElementById('compBody').value : composerSource;
 }
 
 function setComposerFormError(msg){
@@ -107,7 +117,7 @@ function setComposerFormError(msg){
 async function saveComposerTemplate(){
     const payload = {
         name: document.getElementById('compName').value,
-        body: document.getElementById('compBody').value,
+        body: composerBodyText(),
         attachment_expr: document.getElementById('compAttach').value,
         color: document.getElementById('compColor').value,
     };
@@ -125,6 +135,7 @@ async function saveComposerTemplate(){
 
     await loadComposerTemplates();
     composerTemplateId = saved.id;
+    composerSource = saved.body;
     renderComposerTemplateBar();
     document.getElementById('compDeleteBtn').hidden = false;
     // It saves even when invalid (so a half-finished template can be fixed later),
@@ -146,14 +157,37 @@ async function deleteComposerTemplate(){
 }
 
 // ----- edit / preview toggle -----
+//
+// There is ONE text area. In Edit it holds the template source and you type into it;
+// in Preview it holds the rendered reply and is read-only — you read the result in the
+// same place you wrote it, at full height. Switching back restores the source (the
+// template is kept in composerSource, never read back off the textarea in preview).
 
 function setComposerTab(name){
+    if(name === composerTab) return;
+    const ta = document.getElementById('compBody');
+    if(name === 'preview'){
+        composerSource = ta.value;          // remember what is being edited
+    }
     composerTab = name;
     document.getElementById('compTabEdit').classList.toggle('active', name === 'edit');
     document.getElementById('compTabPreview').classList.toggle('active', name === 'preview');
-    document.getElementById('compEditPane').hidden = name !== 'edit';
-    document.getElementById('compPreviewPane').hidden = name !== 'preview';
-    if(name === 'preview'){ runComposerPreview(); }
+
+    const editing = name === 'edit';
+    ta.readOnly = !editing;
+    ta.classList.toggle('comp-body-preview', !editing);
+    // The editor's own controls have no meaning while reading the output.
+    document.getElementById('compEditRow').hidden = !editing;
+    document.getElementById('compHint').hidden = !editing;
+    document.getElementById('compAttachLabel').hidden = !editing;
+    document.getElementById('compAttach').hidden = !editing;
+
+    if(editing){
+        ta.value = composerSource;
+    } else {
+        ta.value = '';                      // filled by the preview when it lands
+        runComposerPreview();
+    }
 }
 
 // ----- the function-block palette -----
@@ -164,16 +198,19 @@ async function loadComposerBlocks(){
         data = await (await fetch('/api/composer/blocks')).json();
     } catch(e){ return; }
     composerBlocks = data.blocks || [];
+    composerCycleMs = data.cycle_ms || 4500;
     renderComposerBlocks();
+    startComposerBlockCycle();
 }
 
 function renderComposerBlocks(){
     const wrap = document.getElementById('compBlocks');
     wrap.textContent = '';
-    composerBlocks.forEach(b => {
+    composerBlocks.forEach((b, i) => {
         const card = document.createElement('div');
         card.className = 'comp-block';
         card.draggable = true;
+        card.dataset.index = String(i);
         card.title = 'Drag into the body, or click to insert at the cursor';
 
         const head = document.createElement('div');
@@ -191,21 +228,30 @@ function renderComposerBlocks(){
         desc.textContent = b.description;
         card.appendChild(desc);
 
+        // The snippet, then INPUT vs RESULT for one demo case. The case cycles slowly
+        // (below), so you watch the same snippet answer different inputs.
         const demo = document.createElement('div');
         demo.className = 'comp-block-demo';
         const snip = document.createElement('code');
         snip.className = 'comp-block-snippet';
         snip.textContent = b.snippet;
         demo.appendChild(snip);
-        const arrow = document.createElement('span');
-        arrow.className = 'comp-block-arrow';
-        arrow.textContent = 'gives';
-        demo.appendChild(arrow);
-        const out = document.createElement('code');
-        out.className = 'comp-block-out';
-        out.textContent = b.demo_output;
-        demo.appendChild(out);
+
+        const io = document.createElement('div');
+        io.className = 'comp-block-io';
+        demo.appendChild(io);
         card.appendChild(demo);
+
+        const dots = document.createElement('div');
+        dots.className = 'comp-block-dots';
+        card.appendChild(dots);
+
+        // Hovering pauses the cycle on this block (and highlights it), so a case you
+        // want to read does not slide away under you.
+        card.addEventListener('mouseenter', () => { composerHoverBlock = i; });
+        card.addEventListener('mouseleave', () => {
+            if(composerHoverBlock === i){ composerHoverBlock = null; }
+        });
 
         // text/plain is what makes the native drop work: a textarea inserts dropped
         // plain text at the DROP caret, which no manual handler can place as well.
@@ -218,7 +264,70 @@ function renderComposerBlocks(){
         card.addEventListener('dragend', () => card.classList.remove('comp-block-dragging'));
         card.addEventListener('click', () => insertIntoComposerBody(b.snippet));
         wrap.appendChild(card);
+        paintComposerBlockCase(card, b, 0);
     });
+}
+
+// Draw one demo case: the inputs it was given, and the result they produced.
+function paintComposerBlockCase(card, block, caseIndex){
+    const demos = block.demos || [];
+    if(!demos.length) return;
+    const demo = demos[caseIndex % demos.length];
+
+    const io = card.querySelector('.comp-block-io');
+    io.textContent = '';
+    (demo.inputs || []).forEach(input => {
+        const line = document.createElement('div');
+        line.className = 'comp-block-in';
+        const k = document.createElement('code');
+        k.className = 'comp-block-in-key';
+        k.textContent = input.name;
+        line.appendChild(k);
+        const v = document.createElement('code');
+        v.className = 'comp-block-in-val';
+        v.textContent = input.value === '' ? '(blank)' : input.value;
+        line.appendChild(v);
+        io.appendChild(line);
+    });
+    const arrow = document.createElement('div');
+    arrow.className = 'comp-block-arrow';
+    arrow.textContent = 'gives';
+    io.appendChild(arrow);
+    const out = document.createElement('code');
+    out.className = 'comp-block-out';
+    out.textContent = demo.output;
+    io.appendChild(out);
+
+    // A dot per case, so it is obvious there is more than one to see.
+    const dots = card.querySelector('.comp-block-dots');
+    dots.textContent = '';
+    if(demos.length > 1){
+        demos.forEach((_d, i) => {
+            const dot = document.createElement('span');
+            dot.className = 'comp-block-dot' + (i === caseIndex % demos.length ? ' on' : '');
+            dot.textContent = '•';
+            dots.appendChild(dot);
+        });
+    }
+    io.classList.remove('comp-block-io-fade');
+    // Restart the fade-in so the change is noticed rather than blinking.
+    void io.offsetWidth;
+    io.classList.add('comp-block-io-fade');
+}
+
+// Cycle every block to its next case, slowly. The hovered block holds still.
+function startComposerBlockCycle(){
+    clearInterval(composerCycleTimer);
+    composerCycleTimer = setInterval(() => {
+        const view = document.getElementById('view-composer');
+        if(!view || view.classList.contains('view-hidden')) return;   // not on screen
+        composerCaseIndex++;
+        document.querySelectorAll('#compBlocks .comp-block').forEach(card => {
+            const i = parseInt(card.dataset.index, 10);
+            if(composerHoverBlock === i) return;                       // paused: being read
+            paintComposerBlockCase(card, composerBlocks[i], composerCaseIndex);
+        });
+    }, composerCycleMs);
 }
 
 // The click fallback (and the keyboard path): insert at the cursor.
@@ -232,6 +341,9 @@ function insertIntoComposerBody(snippet){
 }
 
 function onComposerBodyInput(){
+    if(composerTab === 'edit'){
+        composerSource = document.getElementById('compBody').value;
+    }
     setComposerFormError('');
     schedulePreview();
 }
@@ -452,16 +564,18 @@ function schedulePreview(){
 }
 
 async function runComposerPreview(){
-    const pane = document.getElementById('compPreviewPane');
     if(!composerPick){
-        renderComposerPreviewEmpty('Pick an example email or a cached mail on the left to see '
-            + 'what this template renders to.');
+        setComposerPreviewText('');
+        renderComposerInfo(null, null,
+            'Pick an example email or a cached mail on the left to see what this '
+            + 'template renders to.');
         return;
     }
     const payload = {
         source: composerPick.source,
         ref: composerPick.ref,
-        body: document.getElementById('compBody').value,
+        body: composerTab === 'edit'
+            ? document.getElementById('compBody').value : composerSource,
         attachment_expr: document.getElementById('compAttach').value,
     };
     let data, resp;
@@ -473,90 +587,86 @@ async function runComposerPreview(){
         data = await resp.json();
         if(!resp.ok){ throw new Error(data.description || ('HTTP ' + resp.status)); }
     } catch(e){
-        renderComposerPreviewEmpty('Preview failed: ' + e.message);
+        renderComposerInfo(null, null, 'Preview failed: ' + e.message);
         return;
     }
-    renderComposerPreview(data.plan, data.row);
+    setComposerPreviewText(data.plan.body || '');
+    renderComposerInfo(data.plan, data.row, '');
     if(data.template_error){ setComposerFormError(data.template_error); }
-    pane.scrollTop = 0;
 }
 
-function renderComposerPreviewEmpty(text){
-    const pane = document.getElementById('compPreviewPane');
-    pane.textContent = '';
-    const p = document.createElement('p');
-    p.className = 'comp-preview-empty';
-    p.textContent = text;
-    pane.appendChild(p);
+// The rendered reply goes into the main text area itself — read-only, full height.
+function setComposerPreviewText(text){
+    if(composerTab !== 'preview') return;
+    const ta = document.getElementById('compBody');
+    ta.value = text;
+    ta.scrollTop = 0;
 }
 
-function renderComposerPreview(plan, row){
-    const pane = document.getElementById('compPreviewPane');
-    pane.textContent = '';
+// The slim strip under the text area: what would be drafted, and the row it used.
+// Both halves are height-capped and scroll; neither repeats the body.
+function renderComposerInfo(plan, row, message){
+    const meta = document.getElementById('compInfoMeta');
+    const rowBox = document.getElementById('compInfoRow');
+    meta.textContent = '';
+    rowBox.textContent = '';
 
-    const status = document.createElement('div');
+    if(message){
+        const p = document.createElement('div');
+        p.className = 'comp-info-empty';
+        p.textContent = message;
+        meta.appendChild(p);
+        return;
+    }
+    if(!plan) return;
+
+    const status = document.createElement('span');
     const ready = plan.status === 'ready';
     status.className = 'bulk-badge ' + (ready ? 'bulk-badge-ready' : 'bulk-badge-blocked');
-    status.textContent = ready ? 'ready — Press would draft this row'
-                               : 'blocked — Press would refuse this row';
-    pane.appendChild(status);
+    status.textContent = ready ? 'ready — Press would draft this'
+                               : 'blocked — Press would refuse this';
+    meta.appendChild(status);
 
     (plan.warnings || []).forEach(w => {
         const d = document.createElement('div');
         d.className = 'bulk-warn';
         d.textContent = '⚠ ' + w;
-        pane.appendChild(d);
+        meta.appendChild(d);
     });
 
-    pane.appendChild(composerPreviewField('Subject', plan.subject));
-    pane.appendChild(composerPreviewField('To', (plan.to || []).join(', ')));
-    pane.appendChild(composerPreviewField('Cc', (plan.cc || []).join(', ')));
+    meta.appendChild(composerInfoField('Subject', plan.subject));
+    meta.appendChild(composerInfoField('To', (plan.to || []).join(', ')));
+    meta.appendChild(composerInfoField('Cc', (plan.cc || []).join(', ')));
     if(plan.uses_ftp){
-        pane.appendChild(composerPreviewField('FTP link', plan.ftp_link || '(none)'));
+        meta.appendChild(composerInfoField('FTP link', plan.ftp_link || '(none)'));
     } else if(plan.attachment){
-        pane.appendChild(composerPreviewField(
+        meta.appendChild(composerInfoField(
             'Attachment',
             (plan.attachment.exists ? '📎 ' : '⚠ ') + plan.attachment.name
                 + (plan.attachment.exists ? '' : '  (not on the file server)')));
     } else {
-        pane.appendChild(composerPreviewField('Attachment', '(none resolved)'));
+        meta.appendChild(composerInfoField('Attachment', '(none resolved)'));
     }
 
-    const label = document.createElement('div');
-    label.className = 'comp-preview-label';
-    label.textContent = 'Body';
-    pane.appendChild(label);
-    const body = document.createElement('pre');
-    body.className = 'bulk-bodyprev comp-preview-body';
-    body.textContent = plan.body || '(empty)';
-    pane.appendChild(body);
-
-    // The row this render saw — for a cached mail it is synthesized from the mail
-    // itself (there is no spreadsheet), so show what the template was actually given.
-    const rowLabel = document.createElement('div');
-    rowLabel.className = 'comp-preview-label';
-    rowLabel.textContent = 'Row data used';
-    pane.appendChild(rowLabel);
-    const chips = document.createElement('div');
-    chips.className = 'comp-pick-row';
+    // The row this render actually saw. For a cached mail it is synthesized from the
+    // mail itself (there is no spreadsheet), so show what the template was given.
     Object.keys(row || {}).forEach(key => {
         const chip = document.createElement('span');
         chip.className = 'comp-row-chip';
         chip.textContent = 'row.' + key + ' = ' + (row[key] === '' ? '(blank)' : row[key]);
-        chips.appendChild(chip);
+        rowBox.appendChild(chip);
     });
-    pane.appendChild(chips);
 }
 
-function composerPreviewField(label, value){
+function composerInfoField(label, value){
     const wrap = document.createElement('div');
-    wrap.className = 'comp-preview-field';
+    wrap.className = 'comp-info-field';
     const l = document.createElement('span');
-    l.className = 'comp-preview-label';
+    l.className = 'comp-info-key';
     l.textContent = label;
     wrap.appendChild(l);
     const v = document.createElement('span');
-    v.className = 'comp-preview-value';
+    v.className = 'comp-info-value';
     v.textContent = value || '—';
     wrap.appendChild(v);
     return wrap;

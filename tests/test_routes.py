@@ -34,6 +34,9 @@ class RouteTests(unittest.TestCase):
         self._orig_customers = config.CUSTOMERS_FILE
         self._orig_customer_match = config.CUSTOMER_MATCH_FILE
         self._orig_experimental = config.EXPERIMENTAL_FILE
+        self._orig_categories = config.CATEGORIES_FILE
+        self._orig_compose = config.COMPOSE_TEMPLATES_FILE
+        self._orig_mailbox = config.MAILBOX_FILE
         config.CACHE_FILE = Path(self._tmpdir) / "cache.json"
         config.SETTINGS_FILE = Path(self._tmpdir) / "settings.json"
         config.TAGS_FILE = Path(self._tmpdir) / "tags.json"
@@ -44,6 +47,11 @@ class RouteTests(unittest.TestCase):
         config.CUSTOMERS_FILE = Path(self._tmpdir) / "customers.json"
         config.CUSTOMER_MATCH_FILE = Path(self._tmpdir) / "customer_match.json"
         config.EXPERIMENTAL_FILE = Path(self._tmpdir) / "experimental.json"
+        # create_app() SEEDS these on a first run (the categories, the starter reply
+        # template), so they must be temp files or the suite would write the user's own.
+        config.CATEGORIES_FILE = Path(self._tmpdir) / "categories.json"
+        config.COMPOSE_TEMPLATES_FILE = Path(self._tmpdir) / "compose_templates.json"
+        config.MAILBOX_FILE = Path(self._tmpdir) / "mailbox.json"
         self.app = create_app()
         self.store = self.app.extensions["mail_store"]
         self.store.add_mails([
@@ -61,6 +69,9 @@ class RouteTests(unittest.TestCase):
         config.CUSTOMERS_FILE = self._orig_customers
         config.CUSTOMER_MATCH_FILE = self._orig_customer_match
         config.EXPERIMENTAL_FILE = self._orig_experimental
+        config.CATEGORIES_FILE = self._orig_categories
+        config.COMPOSE_TEMPLATES_FILE = self._orig_compose
+        config.MAILBOX_FILE = self._orig_mailbox
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_index_renders(self):
@@ -639,6 +650,48 @@ class RouteTests(unittest.TestCase):
             "/api/templates/import", data={}, content_type="multipart/form-data"
         )
         self.assertEqual(resp.status_code, 400)
+
+    # ----- organization categories -----
+
+    def test_categories_are_seeded_on_the_first_run(self):
+        data = self.client.get("/api/categories").get_json()
+        self.assertEqual(data["categories"], list(config.ORG_DEFAULT_CATEGORIES))
+        self.assertEqual(data["partner"], config.ORG_PARTNER_CATEGORY)
+
+    def test_typing_a_new_category_on_an_org_creates_it(self):
+        self.client.post("/api/organizations", json={"name": "Acme",
+                                                     "category": "Reseller"})
+        self.assertIn("Reseller",
+                      self.client.get("/api/categories").get_json()["categories"])
+
+    def test_an_existing_category_is_not_duplicated_by_a_different_case(self):
+        self.client.post("/api/organizations", json={"name": "A", "category": "partner"})
+        cats = self.client.get("/api/categories").get_json()["categories"]
+        self.assertEqual(cats, list(config.ORG_DEFAULT_CATEGORIES))   # "Partner" stands
+
+    def test_updating_an_org_with_a_new_category_creates_it(self):
+        org = self.client.post("/api/organizations", json={"name": "Acme"}).get_json()
+        self.client.put("/api/organizations/" + org["id"], json={"category": "Prospect"})
+        self.assertIn("Prospect",
+                      self.client.get("/api/categories").get_json()["categories"])
+
+    def test_a_category_can_be_added_directly(self):
+        data = self.client.post("/api/categories", json={"name": "Reseller"}).get_json()
+        self.assertTrue(data["created"])
+        self.assertIn("Reseller", data["categories"])
+        # Adding it again is a no-op, not an error.
+        self.assertFalse(
+            self.client.post("/api/categories", json={"name": "Reseller"})
+            .get_json()["created"])
+
+    def test_the_category_list_can_be_replaced(self):
+        data = self.client.put("/api/categories",
+                               json={"categories": ["Only"]}).get_json()
+        self.assertEqual(data["categories"], ["Only"])
+
+    def test_category_routes_reject_a_non_object(self):
+        self.assertEqual(self.client.post("/api/categories", json=[1]).status_code, 400)
+        self.assertEqual(self.client.put("/api/categories", json=[1]).status_code, 400)
 
     # ----- customer management -----
 

@@ -32,6 +32,8 @@ let editingAutomationId = null;  // id open in the builder, or null when creatin
 let customersById = {};         // id -> organization, from the last /api/organizations load
 let editingOrgId = null;         // id open in the org builder, or null when creating a new one
 let contactDirectory = [];       // aggregated+resolved contacts, from the last /api/contacts load
+let orgCategories = [];          // the selectable category list (/api/categories) — the Category field's autocomplete
+let orgPartnerCategory = "Partner"; // the category whose MEMBER domains count as internal in reply templates
 let selectedOrgId = null;        // org whose contacts the directory shows; null = unassigned contacts
 let roleSortRepsOnTop = false;   // org-contact sort: representatives first when true, members first when false
 let showRealOrgNames = false;    // while the "hold to reveal" button/key is held, show real org names instead of display names
@@ -80,12 +82,29 @@ let composerHasMore = true;       // is there another page of cache mail to fetc
 let composerLoading = false;      // a page fetch is in flight (guards the scroll sentinel firing twice)
 let composerFilterId = "all";     // active picker filter id
 let composerTab = "edit";         // middle column: 'edit' | 'preview'
+let composerSource = "";          // the template's SOURCE — in preview the text area holds the rendered reply instead
 let composerPreviewTimer = null;  // debounce timer for the live preview call
 let composerObserver = null;      // IntersectionObserver watching the picker's end-of-list sentinel
+let composerCycleMs = 4500;       // how slowly the function palette cycles its demo cases
+let composerCycleTimer = null;    // the palette's cycle interval
+let composerCaseIndex = 0;        // which demo case the palette is showing
+let composerHoverBlock = null;    // index of the hovered block (its cycle pauses so you can read it)
 
-// Press (the spreadsheet -> reply-draft pipeline; templates are authored in Composer).
-let pressTemplates = [];          // [{id, name, error}, ...] from /api/compose-templates
-let pressHasPreview = false;      // a successful preview exists for the current template+file
+// Press (the reply-draft worklist: cache mail items + a template each -> drafts).
+let pressTemplates = [];          // [{id, name, color, body, error}, ...] authored in Composer
+let pressTemplateId = null;       // the template selected in the bar (the default / Apply to all)
+let pressTemplateBarOpen = false; // is the template strip expanded?
+let pressState = null;            // last /api/press/state {mailbox, outlook_available, ready}
+let pressFilters = [];            // the picker's emoji filters (server registry, shared with Composer)
+let pressItems = [];              // the worklist: [{mail, template_id, row, status, reasons, plan, variables, checked, result}]
+let pressColumns = [];            // union of row.* variable names across the applied templates
+let pressFilterId = "all";        // active emoji filter for loading mail items
+let pressOffset = 0;              // lazy-load cursor into the filtered cache
+let pressHasMore = true;          // is there another page of mail to load?
+let pressLoading = false;         // a page fetch is in flight
+let pressArmed = false;           // the two-press button is armed (press again to create)
+let pressComputeTimer = null;     // debounce timer for recomputing after a cell edit
+let pressPromptKind = null;       // which mailbox the inline address prompt is for
 
 // Workshop → Calendar (file pins onto days).
 let calendarYear = 0;            // year of the month currently shown (0 until first render)

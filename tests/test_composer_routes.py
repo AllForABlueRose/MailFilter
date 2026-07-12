@@ -2,8 +2,8 @@
 cache-mail picker, and the preview.
 
 Composer is READ-ONLY -- these tests assert not just what it returns but that it
-writes nothing (no draft lands in the mock drafts dir). The app is built against
-throwaway caches so the real project files are never touched.
+writes nothing at all (no draft, no audit log, no workspace file). The app is built
+against throwaway caches so the real project files are never touched.
 """
 
 import shutil
@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 import config
-from mailfilter import create_app
+from mailfilter import composer, create_app
 
 from tests.factories import make_mail
 
@@ -25,7 +25,7 @@ class ComposerRouteTests(unittest.TestCase):
             "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
             "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "COMPOSE_TEMPLATES_FILE",
             "PASSWORD_SETTINGS_FILE", "EXPERIMENTAL_FILE", "CUSTOMER_MATCH_FILE",
-            "VAULT_FILE", "CALENDAR_PINS_FILE", "MOCK_DRAFTS_DIR", "FILE_SERVER_DIR",
+            "VAULT_FILE", "CALENDAR_PINS_FILE", "MAILBOX_FILE", "CATEGORIES_FILE", "FILE_SERVER_DIR",
             "WORKSPACE_DIR", "COMPOSER_PAGE_SIZE", "COMPOSER_PAGE_SIZE_MAX")}
         config.CACHE_FILE = tmp / "cache.json"
         config.SETTINGS_FILE = tmp / "settings.json"
@@ -39,7 +39,8 @@ class ComposerRouteTests(unittest.TestCase):
         config.CUSTOMER_MATCH_FILE = tmp / "cmatch.json"
         config.VAULT_FILE = tmp / "vault.json"
         config.CALENDAR_PINS_FILE = tmp / "calendar_pins.json"
-        config.MOCK_DRAFTS_DIR = tmp / "drafts"
+        config.MAILBOX_FILE = tmp / "mailbox.json"
+        config.CATEGORIES_FILE = tmp / "categories.json"
         config.WORKSPACE_DIR = tmp / "workspace"
         config.COMPOSER_PAGE_SIZE = 10
         config.COMPOSER_PAGE_SIZE_MAX = 50
@@ -61,9 +62,9 @@ class ComposerRouteTests(unittest.TestCase):
             setattr(config, k, v)
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _drafts(self):
-        d = Path(config.MOCK_DRAFTS_DIR)
-        return list(d.glob("*.json")) if d.exists() else []
+    def _workspace_files(self):
+        d = Path(config.WORKSPACE_DIR)
+        return list(d.rglob("*")) if d.exists() else []
 
     # ----- the function palette -----
 
@@ -75,6 +76,48 @@ class ComposerRouteTests(unittest.TestCase):
                 self.assertTrue(block["demo_output"].strip())
                 self.assertNotIn("(error:", block["demo_output"])
         self.assertIn("row", data["demo_context"])
+
+    def test_every_block_serves_cases_to_cycle_through_with_their_inputs(self):
+        data = self.client.get("/api/composer/blocks").get_json()
+        self.assertEqual(data["cycle_ms"], config.COMPOSER_BLOCK_CYCLE_MS)
+        for block in data["blocks"]:
+            with self.subTest(block=block["id"]):
+                self.assertGreaterEqual(len(block["demos"]), 2)
+                for demo in block["demos"]:
+                    # Each case shows the inputs it was given beside the result.
+                    self.assertTrue(demo["inputs"])
+                    self.assertTrue(all("name" in i and "value" in i
+                                        for i in demo["inputs"]))
+                    self.assertNotIn("(error:", demo["output"])
+
+    # ----- the starter template (seeded on first run) -----
+
+    def test_the_starter_template_is_seeded_and_is_editable(self):
+        templates = self.client.get("/api/compose-templates").get_json()["templates"]
+        self.assertEqual(len(templates), 1)
+        starter = templates[0]
+        self.assertEqual(starter["name"], composer.STARTER_TEMPLATE["name"])
+        self.assertEqual(starter["error"], "")
+
+        # It is an ordinary template: rename it and it stays renamed.
+        self.client.put("/api/compose-templates/" + starter["id"],
+                        json={"name": "My reply"})
+        again = self.client.get("/api/compose-templates").get_json()["templates"]
+        self.assertEqual(again[0]["name"], "My reply")
+
+    def test_the_starter_template_previews_out_of_the_box(self):
+        starter = self.client.get("/api/compose-templates").get_json()["templates"][0]
+        plan = self._preview(template_id=starter["id"], source="sample",
+                             ref="sample-attached").get_json()["plan"]
+        self.assertEqual(plan["status"], "ready")
+        self.assertIn("Dear Kenji,", plan["body"])
+
+    def test_the_starter_template_is_not_resurrected_once_deleted(self):
+        starter = self.client.get("/api/compose-templates").get_json()["templates"][0]
+        self.client.delete("/api/compose-templates/" + starter["id"])
+        # A rebuilt app must respect that the user deleted it (the cache file exists).
+        client = create_app().test_client()
+        self.assertEqual(client.get("/api/compose-templates").get_json()["templates"], [])
 
     # ----- the examples -----
 
@@ -182,12 +225,13 @@ class ComposerRouteTests(unittest.TestCase):
             self._preview(body="x", source="sample", ref="sample-ftp",
                           template_id="nosuch").status_code, 404)
 
-    def test_composer_never_writes_a_draft(self):
+    def test_composer_writes_nothing_at_all(self):
+        # No draft, no audit log, no workspace file — the preview is a pure dry-run.
         body = "{% if row.uses_ftp %}Link{% else %}Attached{% endif %}"
         for sample in self.client.get("/api/composer/samples").get_json()["samples"]:
             self._preview(body=body, source="sample", ref=sample["id"])
         self._preview(body=body, source="mail", ref="M0")
-        self.assertEqual(self._drafts(), [])
+        self.assertEqual(self._workspace_files(), [])
 
 
 if __name__ == "__main__":

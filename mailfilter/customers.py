@@ -11,6 +11,7 @@ store — orgs are passed in, mirroring how ``automation.py`` is handed the stor
 it needs so there is no import cycle (``customer_store`` never imports this).
 """
 
+import config
 from config import RECEIVED_FORMAT
 
 from . import expr
@@ -153,6 +154,52 @@ def _org_info(prefix, org):
         f"{prefix}_org_color": org.get("color", ""),
         f"{prefix}_category": org.get("category", ""),
     }
+
+
+def internal_domains(orgs, user_address=""):
+    """Every domain a reply template should treat as **internal**, as a frozenset.
+
+    "Internal" means *not an outside customer*, which is what a template branches its
+    register on (``{{ if(sender.is_internal, "Best regards,", "Yours faithfully,") }}``).
+    It is decided entirely by data the user entered -- there is no config list of
+    internal domains, for the same reason there is no config mailbox address: who you
+    are is something the app is told and verifies, not something it is born knowing.
+
+    Two sources, unioned:
+
+    1. **The user's own domain** -- from the mailbox they verified against Outlook
+       (``mailbox_store``). Blank until one is verified, which is the honest answer:
+       until the app knows who you are, it cannot know who your colleagues are, and
+       everyone reads as external.
+    2. **Your own and your partners' organizations** -- every **member** domain of every
+       org whose category is ``config.ORG_INTERNAL_CATEGORIES`` (``Root`` -- your own
+       company, which is how a second or third domain of your own is declared -- and
+       ``Partner``, whose staff you treat as colleagues).
+
+    **Member domains only, never representative ones.** A representative fronts an org
+    from *outside* it (a third party on a foreign domain, §3.12), so their domain is not
+    the org's and must not inherit its internal standing. This is the one place the
+    member/representative split changes a template's wording.
+    """
+    internal_categories = {str(c).strip().lower()
+                           for c in config.ORG_INTERNAL_CATEGORIES}
+    domains = set()
+
+    own = _domain_of(_normalize_email(user_address))
+    if own:
+        domains.add(own)
+
+    for org in orgs or []:
+        if str(org.get("category", "")).strip().lower() not in internal_categories:
+            continue
+        for entry in org.get("domains", []) or []:
+            # role "member" (the org's own staff), never "representative".
+            if entry.get("role") == "representative":
+                continue
+            domain = (entry.get("domain") or "").strip().lower()
+            if domain:
+                domains.add(domain)
+    return frozenset(domains)
 
 
 def resolve(email, orgs):

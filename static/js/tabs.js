@@ -40,10 +40,11 @@ function onTabEntered(name){
     if(name === "composer" && typeof loadComposer === "function"){
         loadComposer();
     }
-    // Press: refresh the reply-template list (and the shared-mailbox banner) on entry
-    // — a template authored in Composer must show up here without a reload.
-    if(name === "press" && typeof loadPressTemplates === "function"){
-        loadPressTemplates();
+    // Press: the mailbox state (a deferred verification is retried here, so simply
+    // opening the view once Outlook is running completes it), the templates authored
+    // in Composer, and the worklist.
+    if(name === "press" && typeof loadPress === "function"){
+        loadPress();
     }
     // Always land on the Workshop hub (its card menu); re-check the vault lock
     // state (it can auto-lock) and re-render so the vault card is ready when opened.

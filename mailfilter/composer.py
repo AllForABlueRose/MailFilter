@@ -7,7 +7,7 @@ draft, no audit log, no cache mutation. The actual render is delegated to
 ``bulk_compose.plan_for_mail``, the same call Press's draft path makes, so a
 Composer preview cannot disagree with what Press would draft.
 
-Three catalogues live here:
+Two catalogues live here:
 
 * ``SAMPLES``  -- 10 example mails *and their sheet row*, spread across the
   branches a template author needs to feel out (attached file vs FTP link,
@@ -17,10 +17,9 @@ Three catalogues live here:
   ``render_blocks`` renders that snippet through ``template_lang`` against
   ``DEMO_CONTEXT`` -- so the input/output the palette advertises is produced by
   the real DSL and cannot drift from it.
-* ``FILTERS``  -- the cache-mail picker's emoji filters. Predicates over fields
-  the cache already derives (``_has_attachments``/``_has_links``/
-  ``_has_password``) plus the org/tag lookups passed in. This is a *picker*, not
-  a second copy of ``filters.py`` (which owns the search-query language).
+
+The cache-mail picker Composer's left column uses is ``mail_picker.py``: Press
+loads its worklist through the very same filters and pager.
 
 Pure: stdlib + config + bulk_compose + template_lang. No Flask, no COM, and no
 store import -- snapshots and resolvers are passed in, the same no-cycle shape as
@@ -103,8 +102,10 @@ SAMPLES = [
         "id": "sample-internal",
         "emoji": "🏠",
         "label": "Internal colleague",
-        "note": "The sender's domain is in config.INTERNAL_DOMAINS, so sender.is_internal "
-                "is true -- the hook for a less formal register.",
+        "note": "sender.is_internal is true once this sender's domain is one of yours -- "
+                "the mailbox you verified in Press, or a member domain of a Root (your own "
+                "company) or Partner organization. Until then everyone reads as external, "
+                "which is the honest answer. The hook for a less formal register.",
         "mail": {
             "id": "sample-internal",
             "subject": "Reissue the June statement",
@@ -331,11 +332,40 @@ def sample(sample_id):
 
 
 # ----------------------------------------------------------------------------
+# The starter template
+# ----------------------------------------------------------------------------
+# Seeded into the store on the FIRST ever run (see mailfilter/__init__.py) so a new
+# user opens Composer onto a real, editable, working template rather than greyed-out
+# placeholder text they cannot touch. It is an ordinary template from that moment on:
+# rename it, rewrite it, delete it.
+
+STARTER_TEMPLATE = {
+    "name": "Starter reply",
+    "color": "#0ea5e9",
+    "body": (
+        'Dear {{ default(sender.first_name, "Sir/Madam") }},\n'
+        "\n"
+        "Thank you for your message.\n"
+        "\n"
+        "{% if row.uses_ftp %}You can download the file here: {{ ftp_link(row.file_name) }}\n"
+        "{% else %}Please find {{ row.file_name }} attached.\n"
+        "{% endif %}"
+        "\n"
+        '{{ if(sender.is_internal, "Best regards,", "Yours faithfully,") }}\n'
+    ),
+    "attachment_expr": "",
+}
+
+
+# ----------------------------------------------------------------------------
 # Function blocks (the draggable palette)
 # ----------------------------------------------------------------------------
-# One demo context feeds every block, so the palette reads as one worked example.
 # A block IS its snippet: what the palette shows you is exactly what dropping it
-# inserts, and the output beside it is that snippet rendered through the real DSL.
+# inserts. Each block carries a few CASES -- the same snippet against different
+# inputs -- and ``render_blocks`` renders every one through the real DSL. The palette
+# cycles slowly through them, so you watch the inputs change and the output follow:
+# that is the whole point of the palette, and it cannot drift from the language
+# because nothing here is hardcoded.
 
 DEMO_CONTEXT = {
     "row": {
@@ -375,6 +405,11 @@ BLOCKS = [
         "signature": 'if(condition, then, otherwise)',
         "description": "Picks one of two values inline. Both branches are evaluated, so keep them cheap.",
         "snippet": '{{ if(sender.is_internal, "Hi", "Dear") }}',
+        # Same snippet, different inputs: watch the condition flip the output.
+        "cases": [
+            {"sender": {"is_internal": False}},
+            {"sender": {"is_internal": True}},
+        ],
     },
     {
         "id": "block-default",
@@ -383,6 +418,10 @@ BLOCKS = [
         "signature": "default(value, fallback)",
         "description": "The fallback when the value is empty or falsey. The cure for a bare 'Dear ,'.",
         "snippet": '{{ default(sender.first_name, "Sir/Madam") }}',
+        "cases": [
+            {"sender": {"first_name": "Kenji"}},
+            {"sender": {"first_name": ""}},      # the empty case the fallback exists for
+        ],
     },
     {
         "id": "block-upper",
@@ -391,6 +430,10 @@ BLOCKS = [
         "signature": "upper(text)",
         "description": "Upper-cases the text. Handy in the attachment-name expression.",
         "snippet": "{{ upper(row.ref) }}",
+        "cases": [
+            {"row": {"ref": "acme-1042"}},
+            {"row": {"ref": "orion/rev3"}},
+        ],
     },
     {
         "id": "block-title",
@@ -398,7 +441,11 @@ BLOCKS = [
         "name": "title",
         "signature": "title(text)",
         "description": "Capitalises each word -- for tidying a name that arrived shouting or lowercase.",
-        "snippet": '{{ title("acme manufacturing co") }}',
+        "snippet": "{{ title(row.sender) }}",
+        "cases": [
+            {"row": {"sender": "kenji sato"}},
+            {"row": {"sender": "KENJI SATO"}},   # shouting, tidied
+        ],
     },
     {
         "id": "block-date",
@@ -407,6 +454,11 @@ BLOCKS = [
         "signature": 'date(value, format)',
         "description": "Reformats a datetime. An unparseable value is passed through untouched.",
         "snippet": '{{ date(mail.received, "%d %b %Y") }}',
+        "cases": [
+            {"mail": {"received": "2026-06-30 09:15:00"}},
+            {"mail": {"received": "2026-12-01 23:05:00"}},
+            {"mail": {"received": "not a date"}},   # unparseable -> passed through
+        ],
     },
     {
         "id": "block-ftp-link",
@@ -415,6 +467,10 @@ BLOCKS = [
         "signature": "ftp_link(file_name)",
         "description": "Builds the download URL from config.FTP_LINK_BASE. Use it on the FTP branch.",
         "snippet": "{{ ftp_link(row.file_name) }}",
+        "cases": [
+            {"row": {"file_name": _FILE_PDF}},
+            {"row": {"file_name": _FILE_ZIP}},
+        ],
     },
     {
         "id": "block-contains",
@@ -423,6 +479,10 @@ BLOCKS = [
         "signature": "contains(haystack, needle)",
         "description": "Case-insensitive substring test. Returns true/false -- feed it to if().",
         "snippet": '{{ if(contains(mail.subject, "invoice"), "billing team", "support team") }}',
+        "cases": [
+            {"mail": {"subject": "Invoice for Q2"}},
+            {"mail": {"subject": "Broken login"}},
+        ],
     },
     {
         "id": "block-replace",
@@ -431,6 +491,10 @@ BLOCKS = [
         "signature": "replace(text, find, replace_with)",
         "description": "Replaces every occurrence. Good for swapping a file extension or suffix.",
         "snippet": '{{ replace(row.file_name, ".pdf", "_signed.pdf") }}',
+        "cases": [
+            {"row": {"file_name": "Invoice_ACME.pdf"}},
+            {"row": {"file_name": "Drawings.zip"}},   # no ".pdf" to find -> unchanged
+        ],
     },
     {
         "id": "block-concat",
@@ -439,6 +503,10 @@ BLOCKS = [
         "signature": "concat(a, b, ...)",
         "description": "Glues any number of values into one string. The usual way to build a file name.",
         "snippet": '{{ concat(upper(row.ref), "-", row.qty, ".pdf") }}',
+        "cases": [
+            {"row": {"ref": "acme-1042", "qty": "3"}},
+            {"row": {"ref": "orion-77", "qty": "12"}},
+        ],
     },
     {
         "id": "block-if-tag",
@@ -449,108 +517,87 @@ BLOCKS = [
         "snippet": ("{% if row.uses_ftp %}You can download it here: {{ ftp_link(row.file_name) }}\n"
                     "{% else %}Please find {{ row.file_name }} attached.\n"
                     "{% endif %}"),
+        "cases": [
+            {"row": {"uses_ftp": "yes", "file_name": _FILE_ZIP}},
+            {"row": {"uses_ftp": "", "file_name": _FILE_PDF}},
+        ],
     },
 ]
 
 
-def render_blocks():
-    """Each block plus the output its snippet actually produces on DEMO_CONTEXT.
+NAMESPACES = ("row", "mail", "sender")
 
-    Rendered through ``template_lang`` rather than hardcoded, so the palette can
-    never advertise an output the DSL would not produce.
+
+def _merge(base, overrides):
+    """DEMO_CONTEXT with one case's namespace overrides applied (one level deep)."""
+    merged = {ns: dict(values) for ns, values in base.items()}
+    for ns, values in (overrides or {}).items():
+        merged.setdefault(ns, {}).update(values)
+    return merged
+
+
+def _inputs_for(snippet, context):
+    """The context values the snippet actually READS, as ``[{name, value}]``.
+
+    Asking ``template_lang`` which names the snippet reads (rather than listing them
+    by hand) is what lets the palette show the *inputs beside the result*: only the
+    values that genuinely feed this snippet are shown, and if the snippet changes the
+    inputs follow it.
+    """
+    inputs = []
+    for ns in NAMESPACES:
+        for name in template_lang.variables(snippet, ns):
+            value = context.get(ns, {}).get(name, "")
+            inputs.append({"name": f"{ns}.{name}",
+                           "value": template_lang.stringify(value)})
+    return inputs
+
+
+def render_blocks():
+    """Each block plus its demo **cases**, every one rendered through the real DSL.
+
+    A case is the same snippet against different inputs, so the palette can cycle
+    slowly through them and show how the inputs drive the output. Nothing is
+    hardcoded -- both the inputs shown and the output are derived from the snippet
+    itself -- so the palette can never advertise something the DSL would not do.
     """
     out = []
     for block in BLOCKS:
-        try:
-            demo_output = template_lang.render(block["snippet"], DEMO_CONTEXT)
-        except template_lang.TemplateError as e:
-            demo_output = f"(error: {e})"
-        out.append({**block, "demo_output": demo_output})
+        demos = []
+        for overrides in block.get("cases") or [{}]:
+            context = _merge(DEMO_CONTEXT, overrides)
+            try:
+                output = template_lang.render(block["snippet"], context)
+            except template_lang.TemplateError as e:
+                output = f"(error: {e})"
+            demos.append({"inputs": _inputs_for(block["snippet"], context),
+                          "output": output})
+        out.append({**block, "demos": demos,
+                    # The first case's output, kept so a caller that only wants one
+                    # example (and the tests) need not reach into `demos`.
+                    "demo_output": demos[0]["output"] if demos else ""})
     return out
 
 
-# ----------------------------------------------------------------------------
-# The cache-mail picker
-# ----------------------------------------------------------------------------
-
-FILTERS = [
-    {"id": "all", "emoji": "📥", "label": "All"},
-    {"id": "attachments", "emoji": "📎", "label": "Attachments"},
-    {"id": "links", "emoji": "🔗", "label": "Links"},
-    {"id": "org", "emoji": "🏢", "label": "Customer org"},
-    {"id": "password", "emoji": "🔑", "label": "Password"},
-    {"id": "tag", "emoji": "🏷️", "label": "Tagged"},
-]
-
-FILTER_IDS = tuple(f["id"] for f in FILTERS)
-
-
-def matches(mail, filter_id, org_of, tags_of):
-    """Whether ``mail`` belongs in the picker under ``filter_id``.
-
-    ``org_of`` is a mail -> org|None resolver (customers.mail_org_resolver) and
-    ``tags_of`` a mail-id -> tags dict (TagStore.tags_for); both are passed in so
-    this module imports no store. An unknown filter id shows everything.
-    """
-    if filter_id == "attachments":
-        return bool(mail.get("_has_attachments"))
-    if filter_id == "links":
-        return bool(mail.get("_has_links"))
-    if filter_id == "org":
-        return org_of(mail) is not None
-    if filter_id == "password":
-        return bool(mail.get("_has_password"))
-    if filter_id == "tag":
-        return bool(tags_of(mail.get("id", "")))
-    return True
-
-
-def page(mails, filter_id, offset, limit, org_of, tags_of):
-    """One page of the picker: ``{mails, total, has_more}``.
-
-    ``mails`` is the newest-first snapshot; the filter runs over all of it (so
-    ``total`` is the honest count) and only then is the page sliced out.
-    """
-    selected = [m for m in mails if matches(m, filter_id, org_of, tags_of)]
-    offset = max(0, offset)
-    window = selected[offset:offset + max(0, limit)]
-    return {"mails": window, "total": len(selected),
-            "has_more": offset + len(window) < len(selected)}
-
-
-def row_for_mail(mail):
-    """The sheet row a real cache mail would have had.
-
-    Composer previews against mail from the cache, which never came from a
-    spreadsheet -- so synthesize the row Press would have matched to it: the
-    known columns come from the mail itself, and ``file_name`` from its first
-    attachment. Everything else the template asks for under ``row.*`` resolves to
-    "" (the DSL's rule for a missing key), exactly as an absent sheet column does.
-    """
-    attachments = mail.get("attachments") or []
-    first = attachments[0].get("filename", "") if attachments else ""
-    return {
-        "subject": str(mail.get("subject", "")),
-        "datetime": str(mail.get("received", "")),
-        "sender": str(mail.get("sender", "")),
-        "file_name": str(first),
-        "uses_ftp": "",
-    }
+# The cache-mail picker (FILTERS / matches / page) lives in ``mail_picker.py`` --
+# Press loads mail items through the same one. ``row_for_mail`` lives in
+# ``bulk_compose.py``, which owns the row half of a template's context.
 
 
 # ----------------------------------------------------------------------------
 # Preview
 # ----------------------------------------------------------------------------
 
-def preview(template, mail, row, orgs):
+def preview(template, mail, row, orgs, internal=None):
     """Plan ``template`` against one already-chosen ``mail``. Writes nothing.
 
     A thin call through to ``bulk_compose.plan_for_mail`` -- the same function
     Press's draft path runs -- so what Composer shows is what Press would draft.
-    A template carrying a stored ``error`` is refused here the way ``plan_all``
-    refuses it for a whole run.
+    A template carrying a stored ``error`` is refused here rather than rendered,
+    the same way Press refuses to compute a worklist item with a broken template.
     """
     error = (template or {}).get("error") or ""
     if error:
         return bulk_compose.invalid_template_plan(0, row, error)
-    return bulk_compose.plan_for_mail(0, row, mail, template, orgs)
+    return bulk_compose.plan_for_mail(0, row, mail, template, orgs,
+                                      internal=internal)

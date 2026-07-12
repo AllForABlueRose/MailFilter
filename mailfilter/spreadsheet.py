@@ -117,3 +117,45 @@ def _build_row(headers, raw):
         if alias and alias not in row:
             row[alias] = value
     return row
+
+
+def write_xlsx(path, headers, rows):
+    """Write a sheet of ``headers`` + ``rows`` (list of lists) to ``path``.
+
+    The other half of ``parse_xlsx``: Press hands the user a **form** to fill in
+    (the columns its chosen template actually needs) and reads the filled copy back
+    through ``parse_xlsx``. Every value is written as text, so a reference like
+    ``0012`` keeps its leading zeros and a datetime string round-trips against the
+    cached ``received`` rather than being re-typed by Excel.
+
+    ``openpyxl`` is imported lazily, exactly as in ``parse_xlsx``.
+    """
+    try:
+        import openpyxl
+    except ImportError as e:
+        raise SpreadsheetError(
+            "Excel support unavailable (openpyxl not installed)"
+        ) from e
+
+    wb = openpyxl.Workbook()
+    try:
+        ws = wb.active
+        ws.title = "Press"
+        ws.append([str(h) for h in headers])
+        for cell in ws[1]:
+            cell.font = openpyxl.styles.Font(bold=True)
+        for row in rows:
+            ws.append(["" if v is None else str(v) for v in row])
+        # Force text so Excel doesn't reinterpret a reference or a datetime string.
+        for column in ws.iter_cols(min_row=2):
+            for cell in column:
+                cell.number_format = "@"
+        for i, header in enumerate(headers, start=1):
+            width = max(12, min(42, len(str(header)) + 6))
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
+        wb.save(str(path))
+    finally:
+        wb.close()
+    log.info("Wrote Press form (%d column(s), %d row(s)) to %s",
+             len(headers), len(rows), path)
+    return str(path)

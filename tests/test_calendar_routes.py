@@ -15,6 +15,9 @@ _ISOLATED = (
     "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
     "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "COMPOSE_TEMPLATES_FILE",
     "PASSWORD_SETTINGS_FILE", "EXPERIMENTAL_FILE", "CUSTOMER_MATCH_FILE",
+    # create_app() SEEDS these on a first run, so they MUST be temp files or a test
+    # run would write the user's own caches.
+    "CATEGORIES_FILE", "MAILBOX_FILE",
     "VAULT_FILE", "VAULT_INDEX_FILE", "VAULT_KEY_DPAPI_FILE",
     "WORKSPACE_DIR", "CALENDAR_PINS_FILE",
 )

@@ -1,16 +1,15 @@
 """Unit tests for the pure Composer read-side (mailfilter/composer.py).
 
-Covers the three catalogues (samples, function blocks, picker filters), the row
-synthesized for a cache mail, and the preview delegating to the same planner Press
-uses. No Flask, no Outlook.
+Covers the two catalogues (the 10 example mails, the 10 function blocks) and the
+preview delegating to the same planner Press uses. The cache-mail picker moved to
+mail_picker.py (tests/test_mail_picker.py). No Flask, no Outlook.
 """
 
 import unittest
 
 import config
-from mailfilter import bulk_compose, composer, template_lang
-
-from tests.factories import make_mail
+from mailfilter import (bulk_compose, compose_template_store, composer, customers,
+                        template_lang)
 
 
 class SampleTests(unittest.TestCase):
@@ -48,21 +47,67 @@ class SampleTests(unittest.TestCase):
         self.assertTrue(attached, "no sample takes the attachment branch")
 
     def test_an_internal_and_an_external_sender_are_both_represented(self):
+        # is_internal is decided by Customer Management, so the samples demonstrate both
+        # outcomes once one of their domains belongs to a Root organization.
         domains = [s["mail"]["sender_email"].rsplit("@", 1)[-1] for s in composer.SAMPLES]
-        self.assertTrue(any(d in config.INTERNAL_DOMAINS for d in domains))
-        self.assertTrue(any(d not in config.INTERNAL_DOMAINS for d in domains))
+        root = [{"id": "r", "name": "Mine", "category": "Root",
+                 "domains": [{"domain": domains[2], "role": "member"}], "contacts": []}]
+        internal = customers.internal_domains(root)
+        self.assertTrue(any(d in internal for d in domains))
+        self.assertTrue(any(d not in internal for d in domains))
 
-    def test_every_sample_renders_through_a_real_template(self):
-        body = ('Dear {{ default(sender.first_name, "Sir/Madam") }},\n'
-                "{% if row.uses_ftp %}Link: {{ ftp_link(row.file_name) }}"
-                "{% else %}Attached: {{ row.file_name }}{% endif %}")
-        template = {"body": body, "attachment_expr": "", "error": ""}
+    def test_the_internal_sample_reads_as_internal_once_its_domain_is_yours(self):
+        sample = composer.sample("sample-internal")
+        domain = sample["mail"]["sender_email"].rsplit("@", 1)[-1]
+        template = {"body": '{{ if(sender.is_internal, "internal", "external") }}',
+                    "attachment_expr": "", "error": ""}
+
+        # Nothing declared yet: honestly external.
+        plan = composer.preview(template, sample["mail"], sample["row"], [])
+        self.assertEqual(plan["body"], "external")
+
+        # Declare the domain as your own company's, and it flips.
+        root = [{"id": "r", "name": "Mine", "category": "Root",
+                 "domains": [{"domain": domain, "role": "member"}], "contacts": []}]
+        plan = composer.preview(template, sample["mail"], sample["row"], root,
+                                internal=customers.internal_domains(root))
+        self.assertEqual(plan["body"], "internal")
+
+    BODY = ('Dear {{ default(sender.first_name, "Sir/Madam") }},\n'
+            "{% if row.uses_ftp %}Link: {{ ftp_link(row.file_name) }}"
+            "{% else %}Attached: {{ row.file_name }}{% endif %}")
+
+    def test_every_sample_with_a_file_name_renders(self):
+        template = {"body": self.BODY, "attachment_expr": "", "error": ""}
         for s in composer.SAMPLES:
+            if not s["row"]["file_name"]:
+                continue   # the deliberately-incomplete sample; asserted below
             with self.subTest(sample=s["id"]):
                 plan = composer.preview(template, s["mail"], s["row"], [])
                 self.assertTrue(plan["body"])
-                # The shared mailbox is always CC'd, exactly as Press would draft it.
-                self.assertIn(config.SHARED_MAILBOX_ADDRESS, plan["cc"])
+                # Reply-all: everyone on the original's To/Cc is carried over. Composer
+                # previews with no drafting mailbox, so nothing extra is CC'd.
+                for email in s["mail"]["cc_emails"]:
+                    self.assertIn(email, plan["cc"])
+
+    def test_the_no_file_sample_is_blocked_for_the_stated_reason(self):
+        # The template PRINTS row.file_name and this sample has none, so it is refused
+        # before rendering rather than shipping a draft with a hole in it.
+        template = {"body": self.BODY, "attachment_expr": "", "error": ""}
+        sample = composer.sample("sample-no-file")
+        plan = composer.preview(template, sample["mail"], sample["row"], [])
+        self.assertEqual(plan["status"], "blocked")
+        self.assertEqual(plan["warnings"], ["missing row.file_name"])
+        self.assertEqual(plan["body"], "")
+
+    def test_a_branch_only_variable_does_not_block(self):
+        # row.uses_ftp is blank on the attachment samples -- blank means "no", not
+        # "missing", so it must not block them.
+        template = {"body": self.BODY, "attachment_expr": "", "error": ""}
+        sample = composer.sample("sample-attached")
+        self.assertEqual(sample["row"]["uses_ftp"], "")
+        plan = composer.preview(template, sample["mail"], sample["row"], [])
+        self.assertEqual(plan["status"], "ready")
 
 
 class BlockTests(unittest.TestCase):
@@ -70,20 +115,52 @@ class BlockTests(unittest.TestCase):
         self.assertEqual(len(composer.BLOCKS), 10)
         self.assertEqual(len({b["id"] for b in composer.BLOCKS}), 10)
 
-    def test_every_block_demo_renders_through_the_real_dsl(self):
+    def test_every_demo_case_renders_through_the_real_dsl(self):
         # The palette's advertised output is produced by template_lang, not
         # hardcoded -- so it cannot drift from what the DSL actually does.
         for block in composer.render_blocks():
-            with self.subTest(block=block["id"]):
-                self.assertNotIn("(error:", block["demo_output"])
-                self.assertTrue(block["demo_output"].strip())
+            for i, demo in enumerate(block["demos"]):
+                with self.subTest(block=block["id"], case=i):
+                    self.assertNotIn("(error:", demo["output"])
+                    self.assertTrue(demo["output"].strip())
 
-    def test_block_demo_output_matches_a_direct_render(self):
+    def test_every_block_has_more_than_one_case_to_cycle_through(self):
+        # The whole point of the palette is watching the inputs drive the output.
         for block in composer.render_blocks():
             with self.subTest(block=block["id"]):
-                self.assertEqual(
-                    block["demo_output"],
-                    template_lang.render(block["snippet"], composer.DEMO_CONTEXT))
+                self.assertGreaterEqual(len(block["demos"]), 2)
+
+    def test_a_case_output_matches_a_direct_render_of_its_own_context(self):
+        for block in composer.render_blocks():
+            for i, overrides in enumerate(block["cases"]):
+                with self.subTest(block=block["id"], case=i):
+                    context = composer._merge(composer.DEMO_CONTEXT, overrides)
+                    self.assertEqual(
+                        block["demos"][i]["output"],
+                        template_lang.render(block["snippet"], context))
+
+    def test_the_inputs_shown_are_the_ones_the_snippet_actually_reads(self):
+        # Not a hand-written list: asked of the parser, so the inputs beside the result
+        # are exactly what fed it.
+        for block in composer.render_blocks():
+            expected = []
+            for ns in composer.NAMESPACES:
+                expected += [f"{ns}.{n}"
+                             for n in template_lang.variables(block["snippet"], ns)]
+            for i, demo in enumerate(block["demos"]):
+                with self.subTest(block=block["id"], case=i):
+                    self.assertEqual([x["name"] for x in demo["inputs"]], expected)
+
+    def test_cases_actually_differ_so_the_cycle_shows_something(self):
+        for block in composer.render_blocks():
+            with self.subTest(block=block["id"]):
+                shown = [tuple(x["value"] for x in d["inputs"]) for d in block["demos"]]
+                self.assertEqual(len(set(shown)), len(shown))
+
+    def test_demo_output_is_the_first_case(self):
+        for block in composer.render_blocks():
+            with self.subTest(block=block["id"]):
+                self.assertEqual(block["demo_output"], block["demos"][0]["output"])
 
     def test_named_functions_all_exist_in_the_registry(self):
         for block in composer.BLOCKS:
@@ -93,93 +170,44 @@ class BlockTests(unittest.TestCase):
                 self.assertIn(block["name"], template_lang.FUNCTIONS)
 
 
-class FilterTests(unittest.TestCase):
-    def setUp(self):
-        self.org = {"id": "O1", "name": "Acme"}
-        self.no_org = lambda mail: None
-        self.no_tags = lambda mail_id: {}
+class StarterTemplateTests(unittest.TestCase):
+    """The template seeded on first run: a REAL one, not placeholder text."""
 
-    def test_filter_ids_are_unique(self):
-        self.assertEqual(len(set(composer.FILTER_IDS)), len(composer.FILTER_IDS))
-        self.assertIn("all", composer.FILTER_IDS)
+    def test_it_is_a_valid_template(self):
+        self.assertEqual(
+            compose_template_store.validate(composer.STARTER_TEMPLATE["body"],
+                                            composer.STARTER_TEMPLATE["attachment_expr"]),
+            "")
 
-    def test_all_matches_everything(self):
-        mail = {"id": "M1"}
-        self.assertTrue(composer.matches(mail, "all", self.no_org, self.no_tags))
+    def test_it_renders_against_every_sample_that_has_a_file_name(self):
+        # It renders for all of them. Whether the item is *ready* additionally depends
+        # on the file being on the file server — "sample-missing-file" exists precisely
+        # to show that failure, so it renders but stays blocked.
+        template = {**composer.STARTER_TEMPLATE, "error": ""}
+        for s in composer.SAMPLES:
+            if not s["row"]["file_name"]:
+                continue
+            with self.subTest(sample=s["id"]):
+                plan = composer.preview(template, s["mail"], s["row"], [])
+                self.assertIn("Thank you for your message.", plan["body"])
+                expected = "blocked" if s["id"] == "sample-missing-file" else "ready"
+                self.assertEqual(plan["status"], expected)
 
-    def test_unknown_filter_falls_back_to_showing_everything(self):
-        self.assertTrue(composer.matches({"id": "M1"}, "bogus", self.no_org, self.no_tags))
+    def test_it_demonstrates_both_branches(self):
+        template = {**composer.STARTER_TEMPLATE, "error": ""}
+        ftp = composer.sample("sample-ftp")
+        attached = composer.sample("sample-attached")
+        self.assertIn("download",
+                      composer.preview(template, ftp["mail"], ftp["row"], [])["body"])
+        self.assertIn("attached",
+                      composer.preview(template, attached["mail"], attached["row"],
+                                       [])["body"])
 
-    def test_derived_field_filters(self):
-        mail = {"id": "M1", "_has_attachments": True, "_has_links": False,
-                "_has_password": True}
-        self.assertTrue(composer.matches(mail, "attachments", self.no_org, self.no_tags))
-        self.assertFalse(composer.matches(mail, "links", self.no_org, self.no_tags))
-        self.assertTrue(composer.matches(mail, "password", self.no_org, self.no_tags))
-
-    def test_org_filter_uses_the_supplied_resolver(self):
-        mail = {"id": "M1"}
-        self.assertFalse(composer.matches(mail, "org", self.no_org, self.no_tags))
-        self.assertTrue(composer.matches(mail, "org", lambda m: self.org, self.no_tags))
-
-    def test_tag_filter_uses_the_supplied_tag_lookup(self):
-        mail = {"id": "M1"}
-        self.assertFalse(composer.matches(mail, "tag", self.no_org, self.no_tags))
-        self.assertTrue(composer.matches(
-            mail, "tag", self.no_org, lambda mid: {"downloaded": "recent"}))
-
-
-class PageTests(unittest.TestCase):
-    def setUp(self):
-        self.mails = [{"id": f"M{i}", "_has_attachments": i % 2 == 0} for i in range(25)]
-        self.no_org = lambda mail: None
-        self.no_tags = lambda mail_id: {}
-
-    def _page(self, offset, limit, filter_id="all"):
-        return composer.page(self.mails, filter_id, offset, limit, self.no_org, self.no_tags)
-
-    def test_pages_do_not_overlap_and_cover_everything(self):
-        first = self._page(0, 10)
-        second = self._page(10, 10)
-        third = self._page(20, 10)
-        self.assertEqual([m["id"] for m in first["mails"]], [f"M{i}" for i in range(10)])
-        self.assertEqual([m["id"] for m in second["mails"]], [f"M{i}" for i in range(10, 20)])
-        self.assertEqual(len(third["mails"]), 5)
-        self.assertTrue(first["has_more"])
-        self.assertFalse(third["has_more"])
-
-    def test_total_counts_the_filtered_set_not_the_page(self):
-        result = self._page(0, 10, "attachments")
-        self.assertEqual(result["total"], 13)
-        self.assertEqual(len(result["mails"]), 10)
-        self.assertTrue(result["has_more"])
-
-    def test_offset_past_the_end_is_an_empty_last_page(self):
-        result = self._page(99, 10)
-        self.assertEqual(result["mails"], [])
-        self.assertFalse(result["has_more"])
-
-
-class RowForMailTests(unittest.TestCase):
-    def test_row_is_synthesized_from_the_mail_itself(self):
-        mail = make_mail(subject="Invoice", sender="Alice Smith",
-                         received="2026-06-10 09:30:00",
-                         attachments=[{"filename": "report.pdf"}])
-        row = composer.row_for_mail(mail)
-        self.assertEqual(row["subject"], "Invoice")
-        self.assertEqual(row["datetime"], "2026-06-10 09:30:00")
-        self.assertEqual(row["sender"], "Alice Smith")
-        self.assertEqual(row["file_name"], "report.pdf")
-        self.assertEqual(row["uses_ftp"], "")
-
-    def test_a_mail_with_no_attachment_has_a_blank_file_name(self):
-        self.assertEqual(composer.row_for_mail(make_mail(attachments=[]))["file_name"], "")
-
-    def test_a_missing_row_key_resolves_to_empty_in_the_dsl(self):
-        # A cache mail has no sheet, so row.ref is absent -- the DSL's missing-key
-        # rule ("") must apply rather than raising.
-        row = composer.row_for_mail(make_mail())
-        self.assertEqual(template_lang.render("[{{ row.ref }}]", {"row": row}), "[]")
+    def test_it_greets_a_sender_with_no_name(self):
+        template = {**composer.STARTER_TEMPLATE, "error": ""}
+        s = composer.sample("sample-no-name")
+        plan = composer.preview(template, s["mail"], s["row"], [])
+        self.assertIn("Dear Sir/Madam,", plan["body"])
 
 
 class PreviewTests(unittest.TestCase):

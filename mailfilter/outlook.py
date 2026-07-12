@@ -512,3 +512,91 @@ def fetch_attachment(entry_id, index):
         return filename, data
     finally:
         pythoncom.CoUninitialize()
+
+
+# ----------------------------------------------------------------------------
+# Mailbox probes (Press): prove a mailbox before anything is drafted from it
+# ----------------------------------------------------------------------------
+
+def is_available():
+    """Whether classic Outlook can be reached over COM right now.
+
+    Cheap and side-effect free -- Press uses it to decide whether a mailbox check can
+    run at all, or must be deferred (recorded as ``pending``).
+    """
+    try:
+        pythoncom, pywintypes, win32com = _import_pywin32()
+    except OutlookUnavailableError:
+        return False
+    pythoncom.CoInitialize()
+    try:
+        _dispatch(win32com, pywintypes)
+        return True
+    except OutlookUnavailableError:
+        return False
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def profile_address():
+    """The SMTP address of the Outlook profile that is actually logged in.
+
+    This is what a claimed *personal* mailbox is checked against: not "can you open
+    it" (you may have rights to a colleague's mailbox) but "is it yours".
+
+    Raises OutlookUnavailableError if Outlook can't be reached; returns "" if the
+    profile exposes no resolvable address.
+    """
+    pythoncom, pywintypes, win32com = _import_pywin32()
+    pythoncom.CoInitialize()
+    try:
+        app = _dispatch(win32com, pywintypes)
+        namespace = app.GetNamespace("MAPI")
+        try:
+            entry = namespace.CurrentUser.AddressEntry
+        except Exception as e:
+            raise OutlookUnavailableError(
+                f"could not read the current Outlook user: {e}") from e
+        # CurrentUser is an Exchange DN like everyone else, so the app's existing
+        # DN -> SMTP resolver does the work.
+        return _smtp_from_address_entry(entry).strip()
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def check_mailbox_access(address):
+    """Whether the logged-in profile can actually OPEN the mailbox at ``address``.
+
+    This is what a claimed *shared* mailbox is checked against: opening its Inbox is
+    the only honest proof of access. ``Resolve()`` alone is not -- on Exchange any
+    address in the directory resolves whether or not you have rights to it, so the
+    real test is ``GetSharedDefaultFolder`` (and touching the folder, since COM is
+    lazy and would otherwise defer the permission error).
+
+    Returns True on success. Raises OutlookUnavailableError with a human reason when
+    Outlook can't be reached, the address doesn't resolve, or access is denied --
+    a raw COM permission error is converted here rather than escaping as a 500.
+    """
+    address = (address or "").strip()
+    if not address:
+        raise OutlookUnavailableError("no mailbox address given")
+
+    pythoncom, pywintypes, win32com = _import_pywin32()
+    pythoncom.CoInitialize()
+    try:
+        app = _dispatch(win32com, pywintypes)
+        namespace = app.GetNamespace("MAPI")
+        recipient = namespace.CreateRecipient(address)
+        recipient.Resolve()
+        if not recipient.Resolved:
+            raise OutlookUnavailableError(
+                f"Outlook could not resolve {address!r} (check the address)")
+        try:
+            inbox = namespace.GetSharedDefaultFolder(recipient, config.OUTLOOK_INBOX_FOLDER)
+            int(inbox.Items.Count)  # force the lazy open: a denial surfaces HERE
+        except pywintypes.com_error as e:
+            raise OutlookUnavailableError(
+                f"you do not appear to have access to {address!r}: {e}") from e
+        return True
+    finally:
+        pythoncom.CoUninitialize()

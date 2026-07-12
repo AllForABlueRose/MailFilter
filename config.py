@@ -175,6 +175,23 @@ ORG_NAME_MAX = 120
 # workflows always resolve the real `name`, never this. Capped like the name.
 ORG_DISPLAY_NAME_MAX = 120
 ORG_CATEGORY_MAX = 60
+# The selectable category list (Customer Management). Seeded with these on the first
+# ever run; typing a category that does not exist adds it to the list. Persisted like
+# the other stores (see mailfilter/category_store.py).
+CATEGORIES_FILE = BASE_DIR / "categories_cache.json"
+ORG_DEFAULT_CATEGORIES = ("Root", "Partner", "Vendor", "Customer")
+ORG_CATEGORIES_MAX = 100
+# The categories whose organizations count as INTERNAL for sender.is_internal in reply
+# templates (see customers.internal_domains). "Root" is your own company -- which is how
+# you declare a second or third domain of your own, since your mailbox only reveals one;
+# "Partner" is an organization whose staff you treat as colleagues. In both cases it is
+# their **member** domains that count, never their representatives (a representative
+# fronts the org from outside it). There is deliberately NO config list of internal
+# domains: who is internal is decided by data the user entered, the same reason there is
+# no config mailbox address.
+ORG_INTERNAL_CATEGORIES = ("Root", "Partner")
+# The one whose name the Customer Management UI points out as making staff internal.
+ORG_PARTNER_CATEGORY = "Partner"
 # Org-card appearance (Customer Management). `card_style` swaps the card between
 # the default outline look (white fill, coloured text/border) and a filled look
 # (the org colour as background, white text/border); `card_pattern` overlays a
@@ -230,28 +247,31 @@ FETCH_LOOKBACK = timedelta(days=7)
 # between progress granularity and that overhead.
 FETCH_BATCH_SIZE = 200
 
-# Press. The app's only mailbox-WRITING feature: it turns an Excel sheet
-# into reply DRAFTS in a shared mailbox (ReplyAll, from the shared address, with
-# the shared address CC'd) for a human to review and send. It never sends mail.
-# While BULK_MOCK_MODE is on, the shared-mailbox read and the draft creation are
-# served by in-process mocks (no Outlook/pywin32 needed) so the whole pipeline is
-# exercisable off the production machine. Flip it off there once verified.
-BULK_MOCK_MODE = True
-# The shared mailbox replies are drafted from (SentOnBehalfOf) and always CC'd to.
-SHARED_MAILBOX_ADDRESS = "shared.services@example.com"
+# Press. The app's only mailbox-WRITING feature, and it only ever writes DRAFTS:
+# it loads mail items from the cache, computes a reply template against each, and
+# ReplyAll-drafts them for a human to review and send. It never sends mail. There is
+# no mock: draft creation requires classic Outlook over COM, and the mailbox it
+# drafts from must be entered by the user and PROVED against Outlook first (see
+# mailfilter/mailbox_store.py, outlook.profile_address / check_mailbox_access) --
+# there is no hardcoded mailbox address any more.
+#
 # Root of the file server the appended files are read from. Every resolved
 # attachment path is confined to this directory (no traversal escapes it).
 FILE_SERVER_DIR = BASE_DIR / "mock" / "fileserver"
 # Base for the ftp_link() template function: ftp_link("x.pdf") -> this + "x.pdf".
 FTP_LINK_BASE = "ftp://ftp.example.com/outgoing/"
-# Domains treated as "internal" for sender.is_internal in templates. Lowercased.
-INTERNAL_DOMAINS = ("example.com",)
-# Mock backends used while BULK_MOCK_MODE is on. The shared inbox is a JSON list
-# of mails shaped like the cache (id/subject/sender/sender_email/received/
-# recipient_emails/cc_emails); created drafts are written here as one JSON each
-# instead of Outlook's Drafts folder, so a run is inspectable.
-MOCK_SHARED_INBOX_FILE = BASE_DIR / "mock" / "shared_inbox.json"
-MOCK_DRAFTS_DIR = BASE_DIR / "mock" / "drafts"
+# NOTE: there is no INTERNAL_DOMAINS list any more. sender.is_internal is decided by
+# customers.internal_domains() from the mailbox you verified plus the Root/Partner
+# organizations in Customer Management (config.ORG_INTERNAL_CATEGORIES) -- data you
+# entered, not a constant. Declare another domain of your own by adding it as a member
+# domain of a "Root" organization.
+# The mailboxes Press may draft from (personal = your own, shared = one you have
+# access to), each entered by the user and verified against Outlook before any draft
+# control unlocks. Encoded at rest like the other stores; carries no secrets.
+MAILBOX_FILE = BASE_DIR / "mailbox_cache.json"
+MAILBOX_ADDRESS_MAX = 254          # RFC 5321 practical maximum
+MAILBOX_KINDS = ("personal", "shared")
+MAILBOX_STATUSES = ("unset", "pending", "verified")
 # Named reply templates (master body text + the attachment-filename expression).
 # Same encoded-at-rest JSON format as the other stores (see compose_template_store.py).
 COMPOSE_TEMPLATES_FILE = BASE_DIR / "compose_templates_cache.json"
@@ -260,18 +280,25 @@ COMPOSE_TEMPLATE_BODY_MAX = 20000
 COMPOSE_TEMPLATE_EXPR_MAX = 500
 # Ingest cap: rows beyond this in an uploaded sheet are dropped (reported).
 BULK_MAX_ROWS = 1000
-# Newest-first cap on how many shared-mailbox messages a preview reads to match
-# rows against (keeps a preview bounded on a large shared inbox).
-BULK_SHARED_READ_LIMIT = 1000
-# A row's datetime may differ from the matched mail's ReceivedTime by up to this
-# many seconds and still match (clock/format slack between the sheet and Outlook).
+# A row's datetime may differ from its mail's ReceivedTime by up to this many seconds
+# and still match. Only used to bind an uploaded sheet row that carries no Entry ID
+# back to a loaded mail item (clock/format slack between the sheet and Outlook).
 BULK_MATCH_DATETIME_TOLERANCE_SECONDS = 60
-# Composer (the template workbench; Press is its executing half). Its cache-mail
-# picker is the only lazily-paged list in the app: it fetches this many mails per
-# request and asks for the next page when you scroll to the end. The max clamps a
-# hand-crafted ?limit= so one request can't pull the whole cache.
+# The fill-in form Press writes into today's workspace folder. Fixed name: a same-day
+# re-download overwrites in place, matching workspace_ops.write_report.
+PRESS_FORM_NAME = "press_form.xlsx"
+# Cap on how many mail items one Press worklist may hold (bounds a compute request).
+PRESS_MAX_ITEMS = 500
+# The cache-mail picker (mailfilter/mail_picker.py) is the only lazily-paged list in
+# the app, shared by Composer's left column and Press's worklist loader: it fetches
+# this many mails per request and asks for the next page when you scroll to the end.
+# The max clamps a hand-crafted ?limit= so one request can't pull the whole cache.
 COMPOSER_PAGE_SIZE = 10
 COMPOSER_PAGE_SIZE_MAX = 50
+# Composer's function palette cycles each block through its demo cases (the same
+# snippet against different inputs) so you can watch the inputs drive the output.
+# Deliberately slow: it is there to be read, not to flicker.
+COMPOSER_BLOCK_CYCLE_MS = 4500
 
 # Spreadsheet header -> canonical row field, for the fields Press reasons
 # about (matching + attachment/FTP choice). Matching is case-insensitive on the

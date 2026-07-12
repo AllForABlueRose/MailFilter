@@ -1,28 +1,41 @@
 """Tests for the request-log filter in app.py that mutes the /api/mail poll."""
 
 import logging
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 import config
 
+# `import app` builds the app AT IMPORT TIME, so every path create_app() touches must
+# be redirected first -- especially the ones it *seeds* on a first run (the categories
+# and the starter reply template), which would otherwise be written into the user's
+# real caches. Any new store added to the factory belongs in this list.
+_ISOLATED = (
+    "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
+    "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "CATEGORIES_FILE",
+    "COMPOSE_TEMPLATES_FILE", "MAILBOX_FILE", "PASSWORD_SETTINGS_FILE",
+    "EXPERIMENTAL_FILE", "CUSTOMER_MATCH_FILE", "CALENDAR_PINS_FILE",
+    "VAULT_FILE", "VAULT_INDEX_FILE", "VAULT_KEY_DPAPI_FILE",
+)
+
 
 class PollingLogFilterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Point the stores at temp files before importing app (which builds the
-        # app at import time), so the real caches are never read or written.
-        cls._orig = (config.CACHE_FILE, config.SETTINGS_FILE, config.TAGS_FILE)
-        config.CACHE_FILE = Path(tempfile.mkdtemp()) / "cache.json"
-        config.SETTINGS_FILE = Path(tempfile.mkdtemp()) / "settings.json"
-        config.TAGS_FILE = Path(tempfile.mkdtemp()) / "tags.json"
+        cls._tmp = tempfile.mkdtemp()
+        cls._orig = {name: getattr(config, name) for name in _ISOLATED}
+        for name in _ISOLATED:
+            setattr(config, name, Path(cls._tmp) / name.lower())
         import app
         cls.filt = app._MutePollingAccessLog()
 
     @classmethod
     def tearDownClass(cls):
-        config.CACHE_FILE, config.SETTINGS_FILE, config.TAGS_FILE = cls._orig
+        for name, value in cls._orig.items():
+            setattr(config, name, value)
+        shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def _record(self, requestline):
         # Mirrors werkzeug's access-log record shape.

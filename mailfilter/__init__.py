@@ -15,17 +15,22 @@ settings_store.py, tag_store.py, template_store.py and customer_store.py own
 mutable state.
 """
 
+import logging
+from pathlib import Path
+
 from flask import Flask
 
 import config
 
-from . import automation, bootstrap, calendar_ops, outlook
+from . import automation, bootstrap, calendar_ops, composer, outlook
 from .automation_store import AutomationStore
 from .calendar_store import CalendarStore
+from .category_store import CategoryStore
 from .compose_template_store import ComposeTemplateStore
 from .customer_match_store import CustomerMatchStore
 from .customer_store import CustomerStore
 from .experimental_store import ExperimentalStore
+from .mailbox_store import MailboxStore
 from .password_settings_store import PasswordSettingsStore
 from .routes import create_blueprint, refresh_then_scan
 from .scheduler import RefreshScheduler
@@ -34,6 +39,8 @@ from .store import MailStore
 from .tag_store import TagStore
 from .template_store import TemplateStore
 from .vault_store import VaultStore
+
+log = logging.getLogger(__name__)
 
 
 def create_app():
@@ -61,8 +68,25 @@ def create_app():
     customers = CustomerStore(config.CUSTOMERS_FILE)
     customers.load()
 
+    # The selectable organization categories. Seeded on the FIRST ever run so "Root",
+    # "Partner", "Vendor" and "Customer" are simply there; a category the user then
+    # types is created and joins the list. A later deletion is respected.
+    categories_first_run = not Path(config.CATEGORIES_FILE).exists()
+    categories = CategoryStore(config.CATEGORIES_FILE)
+    categories.load()
+    if categories_first_run:
+        categories.seed(config.ORG_DEFAULT_CATEGORIES)
+
+    # On the FIRST ever run, seed the starter reply template so Composer opens onto a
+    # real, editable, working template instead of placeholder text the user cannot
+    # touch. Keyed on the cache file never having existed: once it does, an empty
+    # template list means the user deleted them all, and that is respected.
+    first_run = not Path(config.COMPOSE_TEMPLATES_FILE).exists()
     compose_templates = ComposeTemplateStore(config.COMPOSE_TEMPLATES_FILE)
     compose_templates.load()
+    if first_run and not compose_templates.snapshot():
+        compose_templates.create(composer.STARTER_TEMPLATE)
+        log.info("Seeded the starter reply template")
 
     password_settings = PasswordSettingsStore(config.PASSWORD_SETTINGS_FILE)
     password_settings.load()
@@ -72,6 +96,10 @@ def create_app():
 
     customer_match = CustomerMatchStore(config.CUSTOMER_MATCH_FILE)
     customer_match.load()
+
+    # The mailboxes Press may draft from, and whether Outlook has proved them.
+    mailboxes = MailboxStore(config.MAILBOX_FILE)
+    mailboxes.load()
 
     # Workshop → Calendar file pins (records only; calendar_ops does the file work).
     calendar = CalendarStore(config.CALENDAR_PINS_FILE)
@@ -84,7 +112,7 @@ def create_app():
     app.register_blueprint(
         create_blueprint(store, settings, tags, templates, automations, customers,
                          compose_templates, password_settings, experimental,
-                         customer_match, vault, calendar)
+                         customer_match, vault, calendar, mailboxes, categories)
     )
 
     # Exposed for the entry point and for tests.
@@ -104,6 +132,8 @@ def create_app():
     app.extensions["password_settings_store"] = password_settings
     app.extensions["experimental_store"] = experimental
     app.extensions["customer_match_store"] = customer_match
+    app.extensions["mailbox_store"] = mailboxes
+    app.extensions["category_store"] = categories
     app.extensions["vault_store"] = vault
     app.extensions["calendar_store"] = calendar
     # Startup pin materialization ("whenever the server is started"): move any file

@@ -43,12 +43,17 @@ const MIME_DOMAIN = "text/x-mailfilter-cust-domain";
 
 async function loadCustomers(){
     try{
-        const [orgsRes, contactsRes] = await Promise.all([
+        const [orgsRes, contactsRes, catsRes] = await Promise.all([
             fetch("/api/organizations"),
             fetch("/api/contacts"),
+            fetch("/api/categories"),
         ]);
         const orgs = (await orgsRes.json()).organizations || [];
         contactDirectory = (await contactsRes.json()).contacts || [];
+        const cats = await catsRes.json();
+        orgCategories = cats.categories || [];
+        orgPartnerCategory = cats.partner || "Partner";
+        renderOrgCategoryOptions();
         customersById = {};
         orgs.forEach(o => { customersById[o.id] = o; });
         // Drop a stale selection if its org was deleted.
@@ -63,6 +68,20 @@ async function loadCustomers(){
 function orgsInOrder(){
     return Object.values(customersById).sort((a, b) =>
         (a.created || "").localeCompare(b.created || ""));
+}
+
+// The Category field's autocomplete. A <datalist> suggests every category that already
+// exists but does not constrain the input: typing a new one is allowed, and saving the
+// org is what creates it (the server adds it to the list).
+function renderOrgCategoryOptions(){
+    const list = document.getElementById("orgCategoryList");
+    if(!list) return;
+    list.textContent = "";
+    orgCategories.forEach(name => {
+        const opt = document.createElement("option");
+        opt.value = name;   // inserted as a value, never as HTML
+        list.appendChild(opt);
+    });
 }
 
 // org id -> {member: n, representative: n} from the resolved directory. A contact

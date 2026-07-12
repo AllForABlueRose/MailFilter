@@ -1691,41 +1691,191 @@ input.drop-target{
     overflow:auto;
     padding:24px;
 }
-.bulk-shared{
+/* -- the mailbox bar: nothing drafts until Outlook has proved the address -- */
+.press-mailbox{
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.press-mailbox select{ min-width:150px; }
+.press-mbx-status{
     font-size:12px;
-    color:#6b7280;
     font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.bulk-shared.bulk-mock{
-    color:#b45309;
-    font-weight:600;
+.press-mbx-verified{ color:#047857; }
+.press-mbx-pending{ color:#b45309; }
+.press-mbx-unset{ color:#b91c1c; }
+.press-cc{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    font-size:12px;
+    color:#374151;
+    white-space:nowrap;
 }
-.bulk-controls{
+.press-prompt{
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+    margin:10px 0;
+    padding:10px 12px;
+    background:#eff6ff;
+    border:1px solid #bfdbfe;
+    border-radius:8px;
+}
+.press-prompt label{ margin:0; font-weight:600; font-size:12px; }
+.press-prompt input[type=text]{ flex:1; min-width:220px; }
+.press-prompt .auto-save-btn,
+.press-prompt .flip-btn{ width:auto; margin:0; padding:7px 14px; }
+.press-prompt .auto-form-hint{ flex-basis:100%; margin:0; }
+
+.press-controls{
     display:flex;
     flex-direction:column;
     gap:10px;
     margin:12px 0 16px;
 }
-.bulk-tmpl-row,
-.bulk-file-row{
+.press-row{
     display:flex;
     align-items:center;
     gap:10px;
     flex-wrap:wrap;
 }
-.bulk-tmpl-row label{
-    margin:0;
+.press-row .flip-btn{ width:auto; margin:0; }
+.press-upload{
+    display:inline-flex;
+    align-items:center;
+    cursor:pointer;
+}
+/* The collapsed template square opens the strip of every Composer template. */
+.press-square-toggle{ width:auto; min-width:64px; padding:6px 10px; }
+.press-template-bar{
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding:6px;
+    background:#f9fafb;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+}
+.press-filters{ margin-left:auto; }
+.press-none{
+    font-size:11px;
+    color:#9ca3af;
+    font-style:italic;
+    white-space:nowrap;
+    align-self:center;
+}
+/* The two-press button: arm (mark everything computed), then create. */
+.press-commit{
+    margin-left:auto;
+    padding:9px 18px;
+    font:inherit;
+    font-size:13px;
     font-weight:600;
+    color:#fff;
+    background:#2563eb;
+    border:2px solid #2563eb;
+    border-radius:8px;
+    cursor:pointer;
 }
-.bulk-tmpl-row select{
-    min-width:220px;
+.press-commit:disabled{
+    color:#9ca3af;
+    background:#f3f4f6;
+    border-color:#e5e7eb;
+    cursor:not-allowed;
 }
-.bulk-file-row .auto-new-btn,
-.bulk-file-row .auto-save-btn{
-    width:auto;
-    margin:0;
-    padding:8px 14px;
+.press-commit.press-armed{
+    background:#047857;
+    border-color:#047857;
+    box-shadow:0 0 0 4px rgba(4, 120, 87, .18);
 }
+.press-more{
+    padding:10px;
+    text-align:center;
+}
+.press-more .flip-btn{ width:auto; margin:0; }
+
+/* -- the worklist table -- */
+.press-table th{ font-size:11px; }
+.press-table td{ vertical-align:middle; }
+.press-var-col{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#2563eb;
+}
+.press-subject{
+    font-size:12px;
+    font-weight:600;
+    color:#111827;
+    max-width:280px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.press-from{
+    font-size:11px;
+    color:#6b7280;
+    max-width:280px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+/* The status dot. Hovering it shows the draft, or why it can't be drafted. */
+.press-dot{
+    font-size:16px;
+    cursor:help;
+}
+.press-dot-ok{ color:#10b981; }
+.press-dot-failed{ color:#ef4444; }
+.press-dot-empty{ color:#d1d5db; }
+.press-tmpl-chip{
+    --tmpl-color:#0ea5e9;
+    display:inline-block;
+    padding:2px 8px;
+    font-size:11px;
+    font-weight:600;
+    color:var(--tmpl-color);
+    background:color-mix(in srgb, var(--tmpl-color) 10%, #fff);
+    border:1px solid var(--tmpl-color);
+    border-radius:999px;
+    white-space:nowrap;
+}
+.press-cell{
+    width:100%;
+    min-width:90px;
+    padding:4px 6px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:11px;
+    border:1px solid #e5e7eb;
+    border-radius:5px;
+}
+.press-cell:focus{
+    border-color:#2563eb;
+    outline:none;
+}
+/* A cell this row's own template never reads: shown, but inert. */
+.press-cell-unused{
+    background:#f3f4f6;
+    color:#9ca3af;
+    border-style:dashed;
+    cursor:not-allowed;
+}
+.press-result{
+    font-size:11px;
+    max-width:260px;
+}
+.press-ok-text{ color:#047857; font-weight:600; }
+/* Row states: marked for drafting (blue), then created (green) or failed (red). */
+.press-table tr.press-marked td{ background:#eff6ff; }
+.press-table tr.press-created td{ background:#ecfdf5; }
+.press-table tr.press-error td{ background:#fef2f2; }
+.press-table tr.drop-hover td{
+    background:#eef2ff;
+    box-shadow:inset 0 0 0 2px #6366f1;
+}
+
 .bulk-summary{
     font-size:13px;
     color:#374151;
@@ -2091,7 +2241,8 @@ input.drop-target{
     padding:7px 14px;
 }
 /* The body is the drop target: a dragged block's text/plain payload lands at the
-   drop caret, which is native textarea behaviour. */
+   drop caret, which is native textarea behaviour. In Preview the SAME text area holds
+   the rendered reply, read-only — you read the result where you wrote it. */
 .comp-body{
     flex:1;
     min-height:220px;
@@ -2099,10 +2250,17 @@ input.drop-target{
     font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size:12px;
     line-height:1.6;
-    resize:vertical;
+    resize:none;
     border:1px solid #e5e7eb;
     border-radius:8px;
 }
+.comp-body-preview{
+    background:#f9fafb;
+    color:#1f2937;
+    border-color:#d1d5db;
+    cursor:default;
+}
+.comp-body-preview:focus{ outline:none; }
 .comp-attach-label{
     margin:0;
     font-size:12px;
@@ -2113,42 +2271,55 @@ input.drop-target{
     font-size:12px;
 }
 
-/* -- the preview pane (the same plan Press would draft) -- */
-.comp-preview-pane{
+/* -- the slim info strip under the text area (no body: that's in the text area) --
+   Each half is height-capped and scrolls, so a long Cc list or a wide row cannot
+   push the editor off the screen. */
+.comp-info{
+    flex:0 0 auto;
     display:flex;
     flex-direction:column;
-    gap:6px;
-    align-items:flex-start;
+    gap:4px;
+    padding-top:8px;
+    border-top:1px dashed #e5e7eb;
 }
-.comp-preview-empty{
-    margin:auto;
-    max-width:340px;
+.comp-info-block{
+    max-height:96px;
+    overflow-y:auto;
+}
+.comp-info-label{
+    font-size:10px;
+    font-weight:600;
+    color:#6b7280;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+}
+.comp-info-rowdata{
+    display:flex;
+    flex-wrap:wrap;
+    gap:3px;
+    max-height:64px;
+}
+.comp-info-empty{
+    padding:6px 0;
+    font-size:12px;
     color:#9ca3af;
-    font-size:13px;
-    text-align:center;
 }
-.comp-preview-field{
+.comp-info-field{
     display:flex;
     gap:8px;
-    width:100%;
-    font-size:12px;
+    font-size:11px;
+    line-height:1.5;
 }
-.comp-preview-label{
-    flex:0 0 92px;
+.comp-info-key{
+    flex:0 0 78px;
     font-weight:600;
     color:#6b7280;
 }
-.comp-preview-value{
+.comp-info-value{
     flex:1;
     min-width:0;
     color:#1f2937;
     word-break:break-word;
-}
-.comp-preview-body{
-    width:100%;
-    max-width:none;
-    max-height:none;
-    font-size:12px;
 }
 
 /* -- right column: the function palette -- */
@@ -2172,14 +2343,18 @@ input.drop-target{
 }
 .comp-block{
     padding:8px 10px;
-    border:1px solid #e5e7eb;
+    border:2px solid #e5e7eb;
     border-radius:8px;
     background:#fff;
     cursor:grab;
+    transition:border-color .12s, background .12s, box-shadow .12s;
 }
+/* Hovering highlights the block — and pauses its demo cycle, so the case you are
+   reading holds still. */
 .comp-block:hover{
-    border-color:#c7d2fe;
+    border-color:#2563eb;
     background:#f8faff;
+    box-shadow:0 0 0 3px rgba(37, 99, 235, .12);
 }
 .comp-block-dragging{ opacity:.45; }
 .comp-block-head{
@@ -2207,7 +2382,7 @@ input.drop-target{
     border-top:1px dashed #e5e7eb;
     display:flex;
     flex-direction:column;
-    gap:2px;
+    gap:3px;
 }
 .comp-block-snippet,
 .comp-block-out{
@@ -2217,6 +2392,38 @@ input.drop-target{
     white-space:pre-wrap;
 }
 .comp-block-snippet{ color:#4b5563; }
+/* One demo case: the inputs it was given, then the result they produced. The case
+   cycles slowly, so the same snippet is seen answering different inputs. */
+.comp-block-io{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+.comp-block-io-fade{ animation:compIoIn .45s ease-out; }
+@keyframes compIoIn{
+    from{ opacity:0; transform:translateY(-2px); }
+    to{ opacity:1; transform:none; }
+}
+.comp-block-in{
+    display:flex;
+    gap:5px;
+    align-items:baseline;
+}
+.comp-block-in-key,
+.comp-block-in-val{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:10px;
+    word-break:break-all;
+}
+.comp-block-in-key{ color:#7c3aed; }
+.comp-block-in-val{
+    flex:1;
+    min-width:0;
+    color:#4b5563;
+    background:#f5f3ff;
+    border-radius:4px;
+    padding:1px 5px;
+}
 .comp-block-arrow{
     font-size:9px;
     color:#9ca3af;
@@ -2229,6 +2436,19 @@ input.drop-target{
     border-radius:4px;
     padding:2px 5px;
 }
+.comp-block-dots{
+    margin-top:4px;
+    display:flex;
+    gap:3px;
+    justify-content:flex-end;
+    height:8px;
+}
+.comp-block-dot{
+    font-size:10px;
+    line-height:8px;
+    color:#e5e7eb;
+}
+.comp-block-dot.on{ color:#2563eb; }
 
 /* ----- Experimental Features (sidebar box + panel) ----- */
 /* The bounding box that holds the enabled experimental-feature controls. */
