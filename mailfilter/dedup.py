@@ -17,9 +17,23 @@ O(notifications × mails). It only runs when the experimental toggle is on and t
 mail set is the bounded cache, so a straightforward scan is fine.
 """
 
+import re
 from datetime import timedelta
 
 import config
+
+# A hyperlink's underlying href reaches the plaintext body as an angle-bracketed
+# segment (``display <href>``). The href is the volatile part — Outlook Safe Links
+# wrapping, tracking params, etc. rewrite it in transit — so a notification that
+# echoes an original body carries the same prose but a different href, which would
+# defeat the whole-body substring match. Strip these segments before matching so the
+# twin match keys on the authored text, not the (rewritten) link targets.
+_HREF_RE = re.compile(r"<[^>]*>")
+
+
+def _match_text(body):
+    """Lowercased ``body`` with angle-bracket href segments removed (see ``_HREF_RE``)."""
+    return _HREF_RE.sub("", body or "").lower()
 
 
 def dedupe(mails, subject):
@@ -34,7 +48,10 @@ def dedupe(mails, subject):
     A mail is a **notification** when its subject *exactly* equals ``subject``
     (case-insensitive, trimmed). A candidate is a **twin** of notification ``N`` when
     it is within the window of ``N`` and its (non-empty) subject and body both appear
-    — case-insensitively, as substrings — inside ``N``'s body.
+    — case-insensitively, as substrings — inside ``N``'s body. The body substring test
+    runs after stripping angle-bracket href segments from both bodies (see
+    ``_match_text``), so an in-transit link rewrite (Safe Links, tracking params) does
+    not defeat an otherwise-identical body.
     """
     target = (subject or "").strip().lower()
     if not target:
@@ -51,7 +68,7 @@ def dedupe(mails, subject):
         note_dt = note.get("_received_dt")
         if note_dt is None:
             continue
-        note_body = (note.get("body", "") or "").lower()
+        note_body = _match_text(note.get("body", ""))
         note_links = note.get("_links", []) or []
         note_id = note.get("id")
         for cand in mails:
@@ -64,7 +81,10 @@ def dedupe(mails, subject):
             cand_body = (cand.get("body", "") or "").strip()
             if not cand_subject or not cand_body:
                 continue
-            if cand_subject.lower() in note_body and cand_body.lower() in note_body:
+            cand_body_match = _match_text(cand_body).strip()
+            if not cand_body_match:  # body was only a link — nothing to match on
+                continue
+            if cand_subject.lower() in note_body and cand_body_match in note_body:
                 hidden.add(note_id)
                 # Record the twin unconditionally (so link-less twins can be tagged);
                 # append the notification's links when it had any.

@@ -17,7 +17,8 @@
     <button type="button" class="appnav-item active" data-tab="mailfilter" aria-current="page">MailFilter</button>
     <button type="button" class="appnav-item" data-tab="automations">Automations</button>
     <button type="button" class="appnav-item" data-tab="customers">Customer Management</button>
-    <button type="button" class="appnav-item" data-tab="bulk">Bulk Compose</button>
+    <button type="button" class="appnav-item" data-tab="composer">Composer</button>
+    <button type="button" class="appnav-item" data-tab="press">Press</button>
     <button type="button" class="appnav-item" data-tab="workshop">Workshop</button>
   </nav>
 </header>
@@ -470,46 +471,124 @@
   </div>
 </div>
 
-<section id="view-bulk" class="view view-bulk view-hidden" data-view="bulk">
+<section id="view-composer" class="view view-composer view-hidden" data-view="composer">
+  <div class="comp-grid">
+
+    <!-- LEFT: pick the mail the template is rendered against. -->
+    <aside class="comp-left">
+      <button type="button" id="compSamplesToggle" class="comp-samples-toggle"
+              onclick="toggleComposerSamples()">
+        <span id="compSamplesCaret">▸</span>
+        <span>Example emails</span>
+        <span class="comp-samples-hint">10 worked examples, with the sheet row assigned to each</span>
+      </button>
+      <div id="compSamplesPanel" class="comp-samples-panel" hidden>
+        <div id="compSamplesList" class="comp-picklist"></div>
+      </div>
+
+      <div id="compCachePanel" class="comp-cache-panel">
+        <div class="comp-cache-head">
+          <span class="comp-cache-title">Mail cache</span>
+          <div id="compFilters" class="comp-filters"></div>
+        </div>
+        <div id="compMailList" class="comp-picklist"></div>
+        <div id="compMailSentinel" class="comp-sentinel"></div>
+        <div id="compMailStatus" class="comp-mail-status"></div>
+      </div>
+    </aside>
+
+    <!-- MIDDLE: the template — squares bar, then edit or preview. -->
+    <main class="comp-main">
+      <div id="compTemplateBar" class="comp-template-bar"></div>
+
+      <div class="comp-tabs">
+        <button type="button" id="compTabEdit" class="comp-tab active"
+                onclick="setComposerTab('edit')">Edit</button>
+        <button type="button" id="compTabPreview" class="comp-tab"
+                onclick="setComposerTab('preview')">Preview</button>
+      </div>
+
+      <div id="compEditPane" class="comp-pane comp-edit-pane">
+        {% raw %}
+        <div class="comp-edit-row">
+          <input type="text" id="compName" class="comp-name" maxlength="80"
+                 placeholder="Template name">
+          <input type="color" id="compColor" class="comp-color" value="#0ea5e9"
+                 title="Square colour">
+          <button type="button" class="auto-save-btn" onclick="saveComposerTemplate()">Save</button>
+          <button type="button" id="compDeleteBtn" class="auto-del-btn"
+                  onclick="deleteComposerTemplate()" hidden>Delete</button>
+        </div>
+        <div class="auto-form-hint">
+          <code>{{ ... }}</code> inserts a value; <code>{% if ... %}…{% else %}…{% endif %}</code>
+          picks conditional text. Variables: <code>row.*</code> (your sheet columns),
+          <code>sender.first_name</code>, <code>sender.is_internal</code>,
+          <code>sender.org</code>, <code>mail.subject</code>. Drag a block in from the right.
+        </div>
+        <textarea id="compBody" class="comp-body" oninput="onComposerBodyInput()"
+                  placeholder="Dear {{ default(sender.first_name, &quot;Sir/Madam&quot;) }},&#10;&#10;{% if row.uses_ftp %}Download it here: {{ ftp_link(row.file_name) }}&#10;{% else %}Please find {{ row.file_name }} attached.&#10;{% endif %}&#10;{{ if(sender.is_internal, &quot;Best regards,&quot;, &quot;Yours faithfully,&quot;) }}"></textarea>
+
+        <label for="compAttach" class="comp-attach-label">Attachment file name
+          <span class="auto-form-hint">(expression; blank = use the row's File Name column)</span></label>
+        <input type="text" id="compAttach" class="comp-attach" maxlength="500"
+               oninput="onComposerBodyInput()"
+               placeholder='e.g. upper(row.ref) + &quot;.pdf&quot;'>
+        <div id="compFormError" class="bulk-tmpl-error" hidden></div>
+        {% endraw %}
+      </div>
+
+      <div id="compPreviewPane" class="comp-pane comp-preview-pane" hidden></div>
+    </main>
+
+    <!-- RIGHT: the draggable function palette. -->
+    <aside class="comp-right">
+      <div class="comp-blocks-head">Function blocks</div>
+      <div class="comp-blocks-hint">Drag one into the body, or click to insert at the cursor.</div>
+      <div id="compBlocks" class="comp-blocks"></div>
+    </aside>
+
+  </div>
+</section>
+
+<section id="view-press" class="view view-press view-hidden" data-view="press">
   <div class="auto-bar">
-    <h2 class="auto-title">Bulk Compose</h2>
-    <span id="bulkSharedInfo" class="bulk-shared"></span>
+    <h2 class="auto-title">Press</h2>
+    <span id="pressSharedInfo" class="bulk-shared"></span>
   </div>
   <p class="cust-hint">
     Upload an Excel (.xlsx) sheet of replies. Each row is matched to a mail in the
     shared mailbox (by subject + datetime + sender) and turned into a
     <b>reply-all draft</b> sent from the shared mailbox and CC'ing it. Drafts are
-    created for your review — <b>nothing is ever sent</b>.
+    created for your review — <b>nothing is ever sent</b>. Templates are authored in
+    <b>Composer</b>, where you can see what one renders to before pressing a whole sheet
+    through it.
   </p>
 
   <div class="bulk-controls">
     <div class="bulk-tmpl-row">
-      <label for="bulkTemplateSelect">Reply template</label>
-      <select id="bulkTemplateSelect" onchange="onBulkTemplateChange()">
+      <label for="pressTemplateSelect">Reply template</label>
+      <select id="pressTemplateSelect" onchange="onPressTemplateChange()">
         <option value="">— select a template —</option>
       </select>
-      <button type="button" class="flip-btn" id="bulkTmplEditBtn"
-              onclick="openBulkTemplateEditor(false)" disabled>✎ Edit</button>
-      <button type="button" class="flip-btn" onclick="openBulkTemplateEditor(true)">+ New</button>
     </div>
-    <div id="bulkTemplateError" class="bulk-tmpl-error" hidden></div>
+    <div id="pressTemplateError" class="bulk-tmpl-error" hidden></div>
 
     <div class="bulk-file-row">
-      <input type="file" id="bulkFile" accept=".xlsx" onchange="onBulkFileChange()">
-      <button type="button" class="auto-new-btn" id="bulkPreviewBtn"
-              onclick="bulkPreview()" disabled>Preview</button>
-      <button type="button" class="auto-save-btn" id="bulkCreateBtn"
-              onclick="bulkCreateDrafts()" disabled>Create drafts</button>
+      <input type="file" id="pressFile" accept=".xlsx" onchange="onPressFileChange()">
+      <button type="button" class="auto-new-btn" id="pressPreviewBtn"
+              onclick="pressPreview()" disabled>Preview</button>
+      <button type="button" class="auto-save-btn" id="pressCreateBtn"
+              onclick="pressCreateDrafts()" disabled>Create drafts</button>
     </div>
-    <div id="bulkSummary" class="bulk-summary"></div>
-    <div id="bulkStatus" class="tray-status"></div>
+    <div id="pressSummary" class="bulk-summary"></div>
+    <div id="pressStatus" class="tray-status"></div>
   </div>
 
   <div class="bulk-table-wrap">
     <table class="directory-table bulk-table">
       <thead>
         <tr>
-          <th><input type="checkbox" id="bulkSelectAll" onclick="toggleBulkSelectAll()"></th>
+          <th><input type="checkbox" id="pressSelectAll" onclick="togglePressSelectAll()"></th>
           <th>Row</th>
           <th>Status</th>
           <th>Recipients</th>
@@ -518,50 +597,12 @@
           <th>Body &amp; warnings</th>
         </tr>
       </thead>
-      <tbody id="bulkRows">
+      <tbody id="pressRows">
         <tr><td colspan="7" class="bulk-empty">Pick a template and a spreadsheet, then Preview.</td></tr>
       </tbody>
     </table>
   </div>
 </section>
-
-<div id="bulkTemplateModal" class="modal-overlay" hidden>
-  <div class="modal auto-modal">
-    <div class="modal-header">
-      <h2 id="bulkTmplTitle">New Reply Template</h2>
-      <button class="icon-btn" onclick="closeBulkTemplateEditor()" title="Close">✕</button>
-    </div>
-    <div class="modal-body auto-form">
-      {% raw %}
-      <label for="bulkTmplName">Name</label>
-      <input type="text" id="bulkTmplName" maxlength="80" placeholder="e.g. Standard reply">
-
-      <label for="bulkTmplBody">Body</label>
-      <div class="auto-form-hint">
-        <code>{{ ... }}</code> inserts a value; <code>{% if ... %}…{% else %}…{% endif %}</code>
-        picks conditional text. Variables: <code>row.*</code> (your columns, e.g.
-        <code>row.file_name</code>), <code>sender.first_name</code>,
-        <code>sender.is_internal</code>, <code>sender.org</code>, <code>mail.subject</code>.
-        Functions: <code>if</code>, <code>default</code>, <code>upper</code>,
-        <code>ftp_link</code>, <code>date</code>.
-      </div>
-      <textarea id="bulkTmplBody" class="org-domains bulk-body"
-                placeholder="Dear {{ default(sender.first_name, &quot;Sir/Madam&quot;) }},&#10;&#10;{% if row.uses_ftp %}Download it here: {{ ftp_link(row.file_name) }}&#10;{% else %}Please find {{ row.file_name }} attached.&#10;{% endif %}&#10;{{ if(sender.is_internal, &quot;Best regards,&quot;, &quot;Yours faithfully,&quot;) }}"></textarea>
-
-      <label for="bulkTmplAttach">Attachment file name
-        <span class="auto-form-hint">(expression; blank = use the row's File Name column)</span></label>
-      <input type="text" id="bulkTmplAttach" maxlength="500"
-             placeholder='e.g. upper(row.ref) + &quot;.pdf&quot;'>
-      <div id="bulkTmplFormError" class="bulk-tmpl-error" hidden></div>
-      {% endraw %}
-    </div>
-    <div class="modal-actions auto-modal-actions">
-      <button type="button" id="bulkTmplDeleteBtn" class="auto-del-btn"
-              onclick="deleteBulkTemplate()" hidden>Delete</button>
-      <button type="button" class="auto-save-btn" onclick="saveBulkTemplate()">Save</button>
-    </div>
-  </div>
-</div>
 
 <div id="passwordModal" class="modal-overlay" hidden>
   <div class="modal auto-modal">
@@ -864,7 +905,8 @@
 <script src="{{ url_for('static', filename='js/tabs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/automations.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/bulkcompose.js') }}"></script>
+<script src="{{ url_for('static', filename='js/composer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/press.js') }}"></script>
 <script src="{{ url_for('static', filename='js/passworddetect.js') }}"></script>
 <script src="{{ url_for('static', filename='js/customermatch.js') }}"></script>
 <script src="{{ url_for('static', filename='js/experimental.js') }}"></script>

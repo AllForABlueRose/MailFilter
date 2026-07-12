@@ -1,6 +1,6 @@
 """A small, sandboxed template language for reply-draft bodies.
 
-Bulk Compose renders one master template per row. The template is mostly literal
+Press renders one master template per row. The template is mostly literal
 text with two kinds of holes:
 
     {{ expr }}                      inline expression -> inserted as text

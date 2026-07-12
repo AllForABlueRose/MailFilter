@@ -67,6 +67,26 @@ let workbenchFiles = [];         // today's workspace files (from /api/workspace
 let workbenchExists = false;     // whether today's workspace folder exists
 let workbenchOrgMeta = {};       // org_id -> {name, color} from /api/organizations (colours + labels)
 
+// Composer (template workbench: author a reply template, preview it against a picked mail).
+let composerTemplates = [];       // [{id, name, color, body, attachment_expr, error}, ...] from /api/compose-templates
+let composerTemplateId = null;    // template square currently selected (loaded into the editor); null = unsaved new
+let composerBlocks = [];          // the draggable function palette, from /api/composer/blocks
+let composerSamples = [];         // the 10 built-in example mails + their sheet rows
+let composerFilters = [];         // the picker's emoji filters, from /api/composer/samples
+let composerPick = null;          // {source: 'sample'|'mail', ref} the mail the preview renders against
+let composerCacheMails = [];      // cache mails loaded into the picker so far (grows as you scroll)
+let composerOffset = 0;           // how many cache mails have been fetched (the lazy-load cursor)
+let composerHasMore = true;       // is there another page of cache mail to fetch?
+let composerLoading = false;      // a page fetch is in flight (guards the scroll sentinel firing twice)
+let composerFilterId = "all";     // active picker filter id
+let composerTab = "edit";         // middle column: 'edit' | 'preview'
+let composerPreviewTimer = null;  // debounce timer for the live preview call
+let composerObserver = null;      // IntersectionObserver watching the picker's end-of-list sentinel
+
+// Press (the spreadsheet -> reply-draft pipeline; templates are authored in Composer).
+let pressTemplates = [];          // [{id, name, error}, ...] from /api/compose-templates
+let pressHasPreview = false;      // a successful preview exists for the current template+file
+
 // Workshop → Calendar (file pins onto days).
 let calendarYear = 0;            // year of the month currently shown (0 until first render)
 let calendarMonth = 0;           // 0-based month currently shown

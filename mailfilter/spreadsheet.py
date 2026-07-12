@@ -1,8 +1,8 @@
-"""Parse an uploaded Excel (.xlsx) sheet into Bulk Compose rows.
+"""Parse an uploaded Excel (.xlsx) sheet into Press rows.
 
 The first sheet's first row is the header; every later row becomes a dict keyed
 by the **normalized header** (trimmed, lowercased), plus stable aliases for the
-fields Bulk Compose reasons about (``config.BULK_COLUMNS`` -> ``row.subject``,
+fields Press reasons about (``config.BULK_COLUMNS`` -> ``row.subject``,
 ``row.file_name`` ...). Cells are coerced to strings so the rest of the pipeline
 (matching, the template DSL) never has to think about Excel cell types; a
 datetime cell is rendered with ``config.RECEIVED_FORMAT`` so it round-trips

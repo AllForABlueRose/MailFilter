@@ -10,7 +10,8 @@ const TAB_TITLES = {
     mailfilter: "Mail Analyzer 3.0",
     automations: "Automations",
     customers: "Customer Management",
-    bulk: "Bulk Compose",
+    composer: "Composer",
+    press: "Press",
     workshop: "Workshop",
 };
 
@@ -34,9 +35,15 @@ function onTabEntered(name){
     if(name === "customers" && typeof loadCustomers === "function"){
         loadCustomers();
     }
-    // Refresh the reply-template list (and shared-mailbox banner) on entry.
-    if(name === "bulk" && typeof loadComposeTemplates === "function"){
-        loadComposeTemplates();
+    // Composer: the templates, the function palette, the examples, and the first
+    // page of cache mail (the rest is fetched as the picker is scrolled).
+    if(name === "composer" && typeof loadComposer === "function"){
+        loadComposer();
+    }
+    // Press: refresh the reply-template list (and the shared-mailbox banner) on entry
+    // — a template authored in Composer must show up here without a reload.
+    if(name === "press" && typeof loadPressTemplates === "function"){
+        loadPressTemplates();
     }
     // Always land on the Workshop hub (its card menu); re-check the vault lock
     // state (it can auto-lock) and re-render so the vault card is ready when opened.

@@ -1,4 +1,4 @@
-"""Persistence for Bulk Compose reply templates.
+"""Persistence for the reply templates Composer authors and Press runs.
 
 A reply template is a small dict: a name, the master ``body`` (literal text plus
 the ``{{ }}`` / ``{% if %}`` holes the DSL renders -- see ``template_lang.py``),
@@ -117,7 +117,7 @@ class ComposeTemplateStore:
                                       base.get("attachment_expr", "")))[
             :config.COMPOSE_TEMPLATE_EXPR_MAX].strip()
 
-        error = _validate(body, attachment_expr)
+        error = validate(body, attachment_expr)
 
         return {
             "id": tid,
@@ -135,8 +135,11 @@ class ComposeTemplateStore:
         persistence.save_encoded(self._cache_file, ordered)
 
 
-def _validate(body, attachment_expr):
-    """First template-language error in body/attachment_expr, or "" if both parse."""
+def validate(body, attachment_expr):
+    """First template-language error in body/attachment_expr, or "" if both parse.
+
+    Public because Composer previews an *unsaved* template straight from the
+    editor: it must be judged by the same rule that will judge it on save."""
     try:
         template_lang.validate(body)
     except template_lang.TemplateError as e:

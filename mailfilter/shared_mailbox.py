@@ -1,4 +1,4 @@
-"""Read the shared mailbox inbox to locate the mail a Bulk Compose row replies to.
+"""Read the shared mailbox inbox to locate the mail a Press row replies to.
 
 Mail arrives in the shared mailbox and is forwarded to the personal inbox (which
 the rest of the app already syncs). A spreadsheet row is matched against the

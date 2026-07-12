@@ -23,6 +23,7 @@ from . import (
     automation,
     bulk_compose,
     calendar_ops,
+    composer,
     customers,
     dedup,
     draft_ops,
@@ -35,6 +36,7 @@ from . import (
     workspace_manifest,
     workspace_ops,
 )
+from . import compose_template_store as compose_template_store_mod
 from .filters import MailQuery, filter_mails
 from .presenter import extra_link_views, to_view_model
 
@@ -951,7 +953,108 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
         return jsonify({"entries": vault_store.search(data.get("query", ""), _vault_org_names())})
 
 
-    # ----- Bulk Compose (reply-draft generation) -----
+    # ----- Composer (template workbench; READ-ONLY, writes nothing) -----
+
+    @bp.get("/api/composer/blocks")
+    def composer_blocks():
+        """The draggable function palette, each block's demo output rendered live
+        through the DSL (so it cannot advertise an output the DSL wouldn't produce)."""
+        return jsonify({"blocks": composer.render_blocks(),
+                        "demo_context": composer.DEMO_CONTEXT})
+
+    @bp.get("/api/composer/samples")
+    def composer_samples():
+        """The 10 example mails and the sheet row assigned to each."""
+        return jsonify({"samples": composer.SAMPLES, "filters": composer.FILTERS})
+
+    @bp.get("/api/composer/mails")
+    def composer_mails():
+        """One page of cache mail for the picker (the app's only paged list).
+
+        ``?filter=`` is one of composer.FILTER_IDS, ``?offset=``/``?limit=`` page
+        through the filtered set newest-first. Returns slim picker cards -- raw
+        strings the frontend inserts as DOM text, not presenter view models."""
+        filter_id = request.args.get("filter", "all")
+        if filter_id not in composer.FILTER_IDS:
+            filter_id = "all"
+        offset = _int_arg("offset", 0)
+        limit = min(_int_arg("limit", config.COMPOSER_PAGE_SIZE),
+                    config.COMPOSER_PAGE_SIZE_MAX)
+
+        resolve_org = _mail_org_resolver()
+        result = composer.page(store.snapshot(), filter_id, offset, limit,
+                               resolve_org, tag_store.tags_for)
+        cards = []
+        for mail in result["mails"]:
+            org = resolve_org(mail)
+            cards.append({
+                "id": mail.get("id", ""),
+                "subject": str(mail.get("subject", "")),
+                "sender": {"name": str(mail.get("sender", "")),
+                           "email": str(mail.get("sender_email", ""))},
+                "received": str(mail.get("received", "")),
+                "has_attachments": bool(mail.get("_has_attachments")),
+                "has_links": bool(mail.get("_has_links")),
+                "has_password": bool(mail.get("_has_password")),
+                "tags": tag_store.tags_for(mail.get("id", "")),
+                "org_labels": [customers.org_label(org)] if org else [],
+            })
+        return jsonify({"mails": cards, "total": result["total"],
+                        "has_more": result["has_more"], "offset": offset})
+
+    @bp.post("/api/composer/preview")
+    def composer_preview():
+        """Render a template against ONE picked mail. A pure dry-run: no draft, no
+        audit log, no cache mutation -- it is Press's preview minus the sheet
+        and the shared mailbox.
+
+        JSON: ``{source: "sample"|"mail", ref: <sample id | mail id>}`` plus either
+        ``template_id`` (a stored template) or a literal ``{body, attachment_expr}``
+        (so the preview follows the editor's unsaved text, not just what's stored)."""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400, description="expected a JSON object")
+
+        tid = data.get("template_id")
+        if tid:
+            template = compose_template_store.get(tid)
+            if template is None:
+                abort(404, description="unknown template")
+        else:
+            # An unsaved draft straight from the editor: judged by the same validator
+            # that will judge it on save, so a half-typed template reports its error
+            # rather than blowing up mid-render.
+            body = str(data.get("body", ""))[:config.COMPOSE_TEMPLATE_BODY_MAX]
+            expr_text = str(data.get("attachment_expr", ""))[
+                :config.COMPOSE_TEMPLATE_EXPR_MAX].strip()
+            template = {"body": body, "attachment_expr": expr_text,
+                        "error": compose_template_store_mod.validate(body, expr_text)}
+
+        source = data.get("source")
+        ref = str(data.get("ref", ""))
+        if source == "sample":
+            item = composer.sample(ref)
+            if item is None:
+                abort(404, description="unknown sample")
+            mail, row = item["mail"], item["row"]
+        elif source == "mail":
+            mail = next((m for m in store.snapshot() if m.get("id") == ref), None)
+            if mail is None:
+                abort(404, description="unknown mail")
+            row = composer.row_for_mail(mail)
+        else:
+            abort(400, description="source must be 'sample' or 'mail'")
+
+        plan = composer.preview(template, mail, row, customer_store.snapshot())
+        return jsonify({"plan": plan, "row": row, "template_error": template.get("error", "")})
+
+    def _int_arg(name, default):
+        try:
+            return max(0, int(request.args.get(name, default)))
+        except (TypeError, ValueError):
+            return default
+
+    # ----- Press (reply-draft generation from a spreadsheet) -----
 
     @bp.get("/api/compose-templates")
     def list_compose_templates():
@@ -1132,5 +1235,5 @@ def _write_bulk_audit(plans, results):
             att or "", r.get("detail", ""),
         ])
     target.write_text(buf.getvalue(), encoding="utf-8-sig", newline="")
-    log.info("Bulk Compose: wrote audit log %s", target)
+    log.info("Press: wrote audit log %s", target)
     return str(target)

@@ -1680,8 +1680,9 @@ input.drop-target{
     line-height:1.5;
 }
 
-/* ----- Bulk Compose view ----- */
-.view-bulk{
+/* ----- Press view (sheet -> reply drafts). Shares the .bulk-* vocabulary with
+   Composer's preview pane, which shows the same plan shape. ----- */
+.view-press{
     flex:1;
     min-width:0;
     min-height:0;
@@ -1792,8 +1793,441 @@ input.drop-target{
     border-radius:6px;
     padding:6px 8px;
 }
-.bulk-body{
-    min-height:160px;
+/* ----- Composer view (the template workbench) -----
+   Three columns: pick a mail (left), edit/preview the template (middle), drag in
+   function blocks (right). Each column scrolls on its own; the page never does. */
+.view-composer{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    overflow:hidden;
+    padding:16px;
+}
+.comp-grid{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:grid;
+    grid-template-columns:320px minmax(0, 1fr) 300px;
+    gap:14px;
+}
+.comp-left,
+.comp-main,
+.comp-right{
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+/* -- left column: the example-email drawer + the cache-mail picker -- */
+.comp-samples-toggle{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    width:100%;
+    padding:8px 10px;
+    font:inherit;
+    font-weight:600;
+    text-align:left;
+    color:#374151;
+    background:#f9fafb;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    cursor:pointer;
+}
+.comp-samples-toggle:hover{ background:#f3f4f6; }
+.comp-samples-toggle.open{
+    background:#eff6ff;
+    border-color:#bfdbfe;
+}
+.comp-samples-hint{
+    margin-left:auto;
+    font-size:10px;
+    font-weight:400;
+    color:#9ca3af;
+    text-align:right;
+}
+/* Open, the drawer takes half the screen height (and scrolls inside). */
+.comp-samples-panel{
+    height:50vh;
+    overflow:auto;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
+}
+.comp-cache-panel{
+    flex:1;
+    min-height:0;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
+}
+.comp-cache-head{
+    position:sticky;
+    top:0;
+    z-index:1;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 10px;
+    background:#f9fafb;
+    border-bottom:1px solid #e5e7eb;
+}
+.comp-cache-title{
+    font-size:12px;
+    font-weight:600;
+    color:#374151;
+}
+.comp-filters{
+    margin-left:auto;
+    display:flex;
+    gap:4px;
+}
+.comp-filter{
+    padding:2px 6px;
+    font-size:14px;
+    line-height:1.4;
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:6px;
+    cursor:pointer;
+    filter:grayscale(1);
+    opacity:.55;
+}
+.comp-filter:hover{ opacity:.85; }
+.comp-filter.active{
+    filter:none;
+    opacity:1;
+    border-color:#2563eb;
+    background:#eff6ff;
+}
+.comp-picklist{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:8px;
+}
+.comp-sentinel{ height:1px; }
+.comp-mail-status{
+    padding:6px 10px 10px;
+    font-size:11px;
+    color:#9ca3af;
+    text-align:center;
+}
+
+/* A pickable mail (example or cached). Selection is a highlighted border;
+   right-clicking one clears the selection. */
+.comp-pick{
+    padding:8px 10px;
+    border:2px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
+    cursor:pointer;
+}
+.comp-pick:hover{ border-color:#c7d2fe; }
+.comp-pick.comp-selected{
+    border-color:#2563eb;
+    background:#eff6ff;
+    box-shadow:0 0 0 3px rgba(37, 99, 235, .12);
+}
+.comp-pick-head{
+    font-size:12px;
+    font-weight:600;
+    color:#1f2937;
+}
+.comp-pick-subject{
+    font-size:12px;
+    font-weight:600;
+    color:#111827;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.comp-pick-from{
+    font-size:11px;
+    color:#6b7280;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.comp-pick-note{
+    margin-top:4px;
+    font-size:10px;
+    line-height:1.45;
+    color:#9ca3af;
+}
+.comp-pick-badges{
+    display:flex;
+    gap:4px;
+    margin-top:4px;
+}
+.comp-pick-badge{ font-size:11px; }
+.comp-pick-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:3px;
+    margin-top:6px;
+}
+.comp-row-chip{
+    padding:1px 6px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:9px;
+    color:#4b5563;
+    background:#f3f4f6;
+    border-radius:4px;
+}
+
+/* -- middle column: the template squares bar, then edit or preview -- */
+.comp-template-bar{
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding:2px;
+}
+.comp-square{
+    --tmpl-color:#0ea5e9;
+    flex:0 0 auto;
+    width:64px;
+    height:64px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+    padding:4px;
+    font:inherit;
+    color:var(--tmpl-color);
+    background:#fff;
+    border:2px solid var(--tmpl-color);
+    border-radius:10px;
+    cursor:pointer;
+}
+.comp-square:hover{ background:color-mix(in srgb, var(--tmpl-color) 8%, #fff); }
+.comp-square.comp-selected{
+    color:#fff;
+    background:var(--tmpl-color);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--tmpl-color) 25%, transparent);
+}
+.comp-square-initials{
+    font-size:17px;
+    font-weight:700;
+    line-height:1;
+}
+.comp-square-label{
+    max-width:100%;
+    font-size:9px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.comp-square-invalid{
+    border-style:dashed;
+}
+.comp-square-add{
+    --tmpl-color:#9ca3af;
+    font-size:22px;
+    font-weight:300;
+    border-style:dashed;
+}
+.comp-tabs{
+    display:flex;
+    gap:6px;
+}
+.comp-tab{
+    padding:5px 16px;
+    font:inherit;
+    font-size:12px;
+    font-weight:600;
+    color:#6b7280;
+    background:#f3f4f6;
+    border:1px solid #e5e7eb;
+    border-radius:999px;
+    cursor:pointer;
+}
+.comp-tab:hover{ background:#e5e7eb; }
+.comp-tab.active{
+    color:#fff;
+    background:#2563eb;
+    border-color:#2563eb;
+}
+.comp-pane{
+    flex:1;
+    min-height:0;
+    overflow:auto;
+    padding:12px;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    background:#fff;
+}
+.comp-edit-pane{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.comp-edit-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.comp-name{ flex:1; }
+.comp-color{
+    width:38px;
+    height:32px;
+    padding:2px;
+    border:1px solid #e5e7eb;
+    border-radius:6px;
+    cursor:pointer;
+}
+.comp-edit-row .auto-save-btn,
+.comp-edit-row .auto-del-btn{
+    width:auto;
+    margin:0;
+    padding:7px 14px;
+}
+/* The body is the drop target: a dragged block's text/plain payload lands at the
+   drop caret, which is native textarea behaviour. */
+.comp-body{
+    flex:1;
+    min-height:220px;
+    padding:10px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:12px;
+    line-height:1.6;
+    resize:vertical;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+}
+.comp-attach-label{
+    margin:0;
+    font-size:12px;
+    font-weight:600;
+}
+.comp-attach{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:12px;
+}
+
+/* -- the preview pane (the same plan Press would draft) -- */
+.comp-preview-pane{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    align-items:flex-start;
+}
+.comp-preview-empty{
+    margin:auto;
+    max-width:340px;
+    color:#9ca3af;
+    font-size:13px;
+    text-align:center;
+}
+.comp-preview-field{
+    display:flex;
+    gap:8px;
+    width:100%;
+    font-size:12px;
+}
+.comp-preview-label{
+    flex:0 0 92px;
+    font-weight:600;
+    color:#6b7280;
+}
+.comp-preview-value{
+    flex:1;
+    min-width:0;
+    color:#1f2937;
+    word-break:break-word;
+}
+.comp-preview-body{
+    width:100%;
+    max-width:none;
+    max-height:none;
+    font-size:12px;
+}
+
+/* -- right column: the function palette -- */
+.comp-blocks-head{
+    font-size:12px;
+    font-weight:600;
+    color:#374151;
+}
+.comp-blocks-hint{
+    font-size:10px;
+    color:#9ca3af;
+}
+.comp-blocks{
+    flex:1;
+    min-height:0;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding-right:2px;
+}
+.comp-block{
+    padding:8px 10px;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
+    cursor:grab;
+}
+.comp-block:hover{
+    border-color:#c7d2fe;
+    background:#f8faff;
+}
+.comp-block-dragging{ opacity:.45; }
+.comp-block-head{
+    font-size:12px;
+    font-weight:600;
+    color:#1f2937;
+}
+.comp-block-sig{
+    display:block;
+    margin-top:2px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:10px;
+    color:#2563eb;
+    word-break:break-word;
+}
+.comp-block-desc{
+    margin-top:4px;
+    font-size:10px;
+    line-height:1.45;
+    color:#6b7280;
+}
+.comp-block-demo{
+    margin-top:6px;
+    padding-top:6px;
+    border-top:1px dashed #e5e7eb;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+.comp-block-snippet,
+.comp-block-out{
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:10px;
+    word-break:break-word;
+    white-space:pre-wrap;
+}
+.comp-block-snippet{ color:#4b5563; }
+.comp-block-arrow{
+    font-size:9px;
+    color:#9ca3af;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+}
+.comp-block-out{
+    color:#047857;
+    background:#ecfdf5;
+    border-radius:4px;
+    padding:2px 5px;
 }
 
 /* ----- Experimental Features (sidebar box + panel) ----- */

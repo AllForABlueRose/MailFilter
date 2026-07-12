@@ -191,5 +191,55 @@ class AttachmentResolutionTests(unittest.TestCase):
                 self.assertEqual(plan["status"], "ready")
 
 
+class PlanForMailTests(unittest.TestCase):
+    """The render half, split out of plan_row so Composer can preview against a mail
+    the user picked (nothing to match). Press and Composer must agree, so what
+    plan_row produces after matching has to equal plan_for_mail on the same mail."""
+
+    ROW = {"subject": "Quarterly invoice", "datetime": "2026-06-20 14:30:00",
+           "sender": "alice@acme.com", "file_name": "inv.pdf", "uses_ftp": "Yes"}
+
+    def test_matches_what_plan_row_produces_for_the_same_mail(self):
+        mail = make_shared_mail()
+        via_row = bulk_compose.plan_row(0, self.ROW, [mail], TEMPLATE, [], 60)
+        direct = bulk_compose.plan_for_mail(0, self.ROW, mail, TEMPLATE, [])
+        self.assertEqual(via_row, direct)
+        self.assertEqual(direct["status"], "ready")
+
+    def test_skips_matching_entirely(self):
+        # A mail the row's subject/datetime/sender would never match is still planned:
+        # the caller already chose it.
+        mail = make_shared_mail(subject="Something else entirely",
+                                received="2020-01-01 00:00:00",
+                                sender_email="stranger@nowhere.test")
+        plan = bulk_compose.plan_for_mail(0, self.ROW, mail, TEMPLATE, [])
+        self.assertEqual(plan["match_count"], 1)
+        self.assertEqual(plan["mail_id"], "M1")
+        self.assertEqual(plan["subject"], "RE: Something else entirely")
+
+    def test_reply_all_recipients_always_cc_the_shared_mailbox(self):
+        plan = bulk_compose.plan_for_mail(0, self.ROW, make_shared_mail(), TEMPLATE, [])
+        self.assertEqual(plan["to"], ["alice@acme.com"])
+        self.assertIn(config.SHARED_MAILBOX_ADDRESS, plan["cc"])
+        self.assertNotIn("alice@acme.com", plan["cc"])
+
+    def test_a_template_error_blocks_the_row(self):
+        broken = {"body": "{{ upper( }}", "attachment_expr": "", "error": ""}
+        plan = bulk_compose.plan_for_mail(0, self.ROW, make_shared_mail(), broken, [])
+        self.assertEqual(plan["status"], "blocked")
+        self.assertTrue(any("template error" in w for w in plan["warnings"]))
+
+
+class InvalidTemplatePlanTests(unittest.TestCase):
+    def test_a_stored_error_blocks_every_row_unrendered(self):
+        rows = [{"subject": "a", "uses_ftp": "Yes"}, {"subject": "b"}]
+        broken = {"body": "ok", "attachment_expr": "", "error": "body: bad"}
+        out = bulk_compose.plan_all(rows, [make_shared_mail()], broken, [])
+        self.assertEqual(out["summary"], {"total": 2, "ready": 0, "blocked": 2})
+        for plan in out["plans"]:
+            self.assertEqual(plan["body"], "")
+            self.assertIn("template is invalid", plan["warnings"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

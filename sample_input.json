@@ -1,0 +1,44 @@
+[
+  {
+    "id": "SAMPLE-NOTIFICATION-0001",
+    "subject": "A ticket has been assigned to a team",
+    "sender": "Zendesk Notifications",
+    "sender_email": "notifications@zendesk.example.com",
+    "recipient_names": [
+      "Alice Tan",
+      "Bob Ng"
+    ],
+    "recipient_emails": [
+      "alice.tan@example.com",
+      "bob.ng@example.com"
+    ],
+    "cc_names": [],
+    "cc_emails": [],
+    "body": "A ticket has been assigned to a team, please review./r/n/r/nTitle: Quarterly SSL certificate request/r/nURL: https://portal.example.com <https://tickets.example.net> /r/n------------------------------------------------------------/r/n/r/nDear Sir or Madam,/r/n/r/nThis is Tanaka from TechnoSoft./r/n/r/nThank you for your continued support./r/n/r/nPlease issue the attached SSL certificate (1 expiring account)./r/n/r/n- Attachment: SSL_Form_20260707.xlsx/r/n/r/nDownload steps:/r/n1. Open the URL below and enter your email address to get a one-time password./r/n2. Log in with the one-time password sent to that address./r/n3. After logging in, click the download link for the target file./r/n/r/nURL:/r/nhttps://files.example.com <https://na01.safelinks.protection.outlook.com/?url=https%3A%2F%2Ffiles.example.com%2Fdownload%2Fabc123&data=05%7C02%7Calice.tan%40example.com%7C0123456789abcdef&sdata=AbCdEfGhIjKlMnOp%3D&reserved=0> /r/n/r/nBest regards./r/n/r/n[AB12CD-EF34]Ticket-Id:100200Account-Subdomain:acme-corp ",
+    "received": "2026-07-07 09:09:43",
+    "conversation_id": "SAMPLECONV0000000000000000000001",
+    "attachments": [],
+    "is_thread": false
+  },
+  {
+    "id": "SAMPLE-ORIGINAL-0002",
+    "subject": "Quarterly SSL certificate request",
+    "sender": "Rebecca Spencer",
+    "sender_email": "rebecca.spencer@example.com",
+    "recipient_names": [
+      "Charlie Ito",
+      "Dana Kim"
+    ],
+    "recipient_emails": [
+      "charlie.ito@example.com",
+      "dana.kim@example.com"
+    ],
+    "cc_names": [],
+    "cc_emails": [],
+    "body": "Dear Sir or Madam,/r/n/r/nThis is Tanaka from TechnoSoft./r/n/r/nThank you for your continued support./r/n/r/nPlease issue the attached SSL certificate (1 expiring account)./r/n/r/n- Attachment: SSL_Form_20260707.xlsx/r/n/r/nDownload steps:/r/n1. Open the URL below and enter your email address to get a one-time password./r/n2. Log in with the one-time password sent to that address./r/n3. After logging in, click the download link for the target file./r/n/r/nURL:/r/nhttps://files.example.com <https://files.example.com/download/abc123> /r/n/r/nBest regards./r/n",
+    "received": "2026-07-07 09:08:22",
+    "conversation_id": "SAMPLECONV0000000000000000000002",
+    "attachments": [],
+    "is_thread": false
+  }
+]

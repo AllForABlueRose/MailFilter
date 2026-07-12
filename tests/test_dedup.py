@@ -60,6 +60,29 @@ class DedupeTests(unittest.TestCase):
         snap = _snap([make_mail(**NOTE), make_mail(**empty)])
         self.assertEqual(dedup.dedupe(snap, "New ticket created"), (set(), {}))
 
+    def test_href_rewrite_in_notification_still_matches_twin(self):
+        # The notification echoes the twin's body verbatim except the hyperlink href
+        # was rewritten in transit (Outlook Safe Links). The whole-body match keys on
+        # the authored text, not the href, so the twin is still paired.
+        twin = dict(id="TWIN_SL", subject="SSL certificate request",
+                    received="2026-06-10 09:38:00",
+                    body="Please download the file.\n"
+                         "URL: https://files.example.com "
+                         "<https://files.example.com/download/abc123>\nRegards")
+        note = dict(id="NOTE_SL", subject="New ticket created",
+                    received="2026-06-10 09:40:00",
+                    body="A ticket was opened.\nSubject: SSL certificate request\n"
+                         "Please download the file.\n"
+                         "URL: https://files.example.com "
+                         "<https://na01.safelinks.protection.outlook.com/?url="
+                         "https%3A%2F%2Ffiles.example.com%2Fdownload%2Fabc123"
+                         "&reserved=0>\nRegards\n[ZZ-1]Ticket-Id:9")
+        snap = _snap([make_mail(**note), make_mail(**twin)])
+        hidden, twins = dedup.dedupe(snap, "New ticket created")
+        self.assertEqual(hidden, {"NOTE_SL"})
+        note_links = next(m["_links"] for m in snap if m["id"] == "NOTE_SL")
+        self.assertEqual(twins, {"TWIN_SL": note_links})
+
     def test_multiple_twins_all_get_the_link(self):
         twin2 = dict(ORIG, id="ORIG2", received="2026-06-10 09:45:00")
         snap = _snap([make_mail(**NOTE), make_mail(**ORIG), make_mail(**twin2)])

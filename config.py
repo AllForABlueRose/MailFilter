@@ -230,7 +230,7 @@ FETCH_LOOKBACK = timedelta(days=7)
 # between progress granularity and that overhead.
 FETCH_BATCH_SIZE = 200
 
-# Bulk Compose. The app's only mailbox-WRITING feature: it turns an Excel sheet
+# Press. The app's only mailbox-WRITING feature: it turns an Excel sheet
 # into reply DRAFTS in a shared mailbox (ReplyAll, from the shared address, with
 # the shared address CC'd) for a human to review and send. It never sends mail.
 # While BULK_MOCK_MODE is on, the shared-mailbox read and the draft creation are
@@ -266,7 +266,14 @@ BULK_SHARED_READ_LIMIT = 1000
 # A row's datetime may differ from the matched mail's ReceivedTime by up to this
 # many seconds and still match (clock/format slack between the sheet and Outlook).
 BULK_MATCH_DATETIME_TOLERANCE_SECONDS = 60
-# Spreadsheet header -> canonical row field, for the fields Bulk Compose reasons
+# Composer (the template workbench; Press is its executing half). Its cache-mail
+# picker is the only lazily-paged list in the app: it fetches this many mails per
+# request and asks for the next page when you scroll to the end. The max clamps a
+# hand-crafted ?limit= so one request can't pull the whole cache.
+COMPOSER_PAGE_SIZE = 10
+COMPOSER_PAGE_SIZE_MAX = 50
+
+# Spreadsheet header -> canonical row field, for the fields Press reasons
 # about (matching + attachment/FTP choice). Matching is case-insensitive on the
 # trimmed header. EVERY column is still exposed to the DSL by its normalized
 # header; these aliases just give the known ones stable names (row.file_name etc.).

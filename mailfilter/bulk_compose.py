@@ -1,4 +1,4 @@
-"""The brain of Bulk Compose: turn spreadsheet rows into planned reply drafts.
+"""The shared brain of Composer and Press: turn a row + a mail into a planned draft.
 
 For each row it (1) matches the row to exactly one mail in the shared mailbox by
 normalized subject + datetime (within tolerance) + sender, (2) classifies the
@@ -180,10 +180,9 @@ def resolve_attachment_path(filename):
 # Planning
 # ----------------------------------------------------------------------------
 
-def plan_row(index, row, shared_mails, template, orgs, tolerance):
-    """Build one plan dict for ``row`` (see module docstring for the shape)."""
-    warnings = []
-    plan = {
+def blank_plan(index, row):
+    """A plan dict in its initial (blocked, nothing-resolved) state."""
+    return {
         "row_index": index,
         "status": "blocked",
         "mail_id": "",
@@ -195,23 +194,33 @@ def plan_row(index, row, shared_mails, template, orgs, tolerance):
         "ftp_link": "",
         "attachment": None,
         "match_count": 0,
-        "warnings": warnings,
+        "warnings": [],
     }
 
-    matches = _find_matches(row, shared_mails, tolerance)
-    plan["match_count"] = len(matches)
-    if not matches:
-        warnings.append("no matching mail found in the shared mailbox")
-        return plan
-    if len(matches) > 1:
-        warnings.append(f"{len(matches)} mails match this row; refine subject/datetime/sender")
-        return plan
 
-    mail = matches[0]
+def invalid_template_plan(index, row, template_error):
+    """The plan a row gets when the template itself is stored broken: blocked,
+    unrendered. A template that cannot parse blocks every row rather than
+    half-rendering some of them."""
+    plan = blank_plan(index, row)
+    plan["warnings"].append(f"template is invalid: {template_error}")
+    return plan
+
+
+def plan_for_mail(index, row, mail, template, orgs):
+    """Plan ``row`` against an already-chosen ``mail`` (no matching).
+
+    The render half of ``plan_row``: recipients, subject, the {row, mail, sender}
+    context, the body, and the attachment-or-FTP branch. Composer previews a
+    template against a mail the user picked, so there is nothing to match --
+    calling this directly is what keeps its preview and Press's draft identical.
+    """
+    plan = blank_plan(index, row)
+    warnings = plan["warnings"]
+    plan["match_count"] = 1
     plan["mail_id"] = mail.get("id", "")
     plan["store_id"] = mail.get("store_id", "")
-    to, cc = _reply_recipients(mail)
-    plan["to"], plan["cc"] = to, cc
+    plan["to"], plan["cc"] = _reply_recipients(mail)
     plan["subject"] = _reply_subject(mail.get("subject", ""))
 
     context = {"row": dict(row), "mail": _mail_context(mail),
@@ -231,6 +240,21 @@ def plan_row(index, row, shared_mails, template, orgs, tolerance):
     if not warnings:
         plan["status"] = "ready"
     return plan
+
+
+def plan_row(index, row, shared_mails, template, orgs, tolerance):
+    """Build one plan dict for ``row`` (see module docstring for the shape)."""
+    matches = _find_matches(row, shared_mails, tolerance)
+    if len(matches) != 1:
+        plan = blank_plan(index, row)
+        plan["match_count"] = len(matches)
+        if not matches:
+            plan["warnings"].append("no matching mail found in the shared mailbox")
+        else:
+            plan["warnings"].append(
+                f"{len(matches)} mails match this row; refine subject/datetime/sender")
+        return plan
+    return plan_for_mail(index, row, matches[0], template, orgs)
 
 
 def _reply_subject(subject):
@@ -289,12 +313,7 @@ def plan_all(rows, shared_mails, template, orgs, tolerance=None):
     plans = []
     for i, row in enumerate(rows):
         if template_error:
-            plans.append({
-                "row_index": i, "status": "blocked", "mail_id": "", "to": [], "cc": [],
-                "subject": "", "body": "", "uses_ftp": False, "ftp_link": "",
-                "attachment": None, "match_count": 0,
-                "warnings": [f"template is invalid: {template_error}"],
-            })
+            plans.append(invalid_template_plan(i, row, template_error))
             continue
         plans.append(plan_row(i, row, shared_mails, template, orgs, tolerance))
 

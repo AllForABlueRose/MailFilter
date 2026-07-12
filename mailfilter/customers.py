@@ -159,7 +159,7 @@ def resolve(email, orgs):
     """Resolve a single ``email`` to its base-membership and representative orgs.
 
     The single-address analog of :func:`build_directory`'s per-contact resolution
-    (override > domain, first-wins), so Bulk Compose can branch a reply template on
+    (override > domain, first-wins), so a reply template can branch on
     who the sender is without rebuilding the whole directory. Returns
     ``{member_org_id, member_org_name, member_category, rep_org_id, rep_org_name,
     role}`` -- ids/strings empty when unresolved; ``role`` is "representative" if a
