@@ -10,6 +10,8 @@ the shared one must be openable.
 import json
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -80,13 +82,27 @@ class PressRouteTests(unittest.TestCase):
                  "template_id": self.template["id"] if template_id else None,
                  "row": row or {}}]
 
-    def _verify(self, kind="personal", address="me@example.com"):
+    def _verify(self, kind="personal", address="me@example.com", profile=None):
         """Verify a mailbox against a stubbed Outlook profile."""
         with mock.patch.object(outlook, "is_available", return_value=True), \
-             mock.patch.object(outlook, "profile_address", return_value="me@example.com"), \
+             mock.patch.object(outlook, "profile_address",
+                               return_value=profile or "me@example.com"), \
              mock.patch.object(outlook, "check_mailbox_access", return_value=True):
             return self.client.post("/api/press/mailbox",
                                     json={"kind": kind, "address": address}).get_json()
+
+    def _mailboxes(self):
+        return self.app.extensions["mailbox_store"]
+
+    def _await_status(self, kind, status, timeout=5.0):
+        """Wait for the off-thread verification to record its verdict."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            box = self._mailboxes().get(kind)
+            if box["status"] == status:
+                return box
+            time.sleep(0.01)
+        return self._mailboxes().get(kind)
 
     # ----- mailbox verification -----
 
@@ -114,12 +130,44 @@ class PressRouteTests(unittest.TestCase):
                                side_effect=outlook.OutlookUnavailableError("no Outlook")):
             self.client.post("/api/press/mailbox",
                              json={"kind": "personal", "address": "me@example.com"})
-        # Opening Press once Outlook is running retries the deferred check.
+        # Opening Press once Outlook is running retries the deferred check -- but off
+        # the request thread, so the verdict lands just after the response rather than
+        # in it. Entering a tab must never wait on a COM call that may not answer.
         with mock.patch.object(outlook, "is_available", return_value=True), \
              mock.patch.object(outlook, "profile_address", return_value="me@example.com"):
+            self.client.get("/api/press/state")
+            box = self._await_status("personal", "verified")
+        self.assertEqual(box["status"], "verified")
+        self.assertTrue(self.client.get("/api/press/state").get_json()["ready"])
+
+    def test_opening_press_does_not_wait_on_a_slow_probe(self):
+        """The deferred re-check must not hold the response open."""
+        with mock.patch.object(outlook, "is_available", return_value=False), \
+             mock.patch.object(outlook, "profile_address",
+                               side_effect=outlook.OutlookUnavailableError("no Outlook")):
+            self.client.post("/api/press/mailbox",
+                             json={"kind": "personal", "address": "me@example.com"})
+
+        released = threading.Event()
+
+        def slow_probe():
+            released.wait(10)
+            return "me@example.com"
+
+        with mock.patch.object(outlook, "is_available", return_value=True), \
+             mock.patch.object(outlook, "profile_address", side_effect=slow_probe):
+            started = time.monotonic()
             data = self.client.get("/api/press/state").get_json()
-        self.assertEqual(data["mailbox"]["personal"]["status"], "verified")
-        self.assertTrue(data["ready"])
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 2)                            # returned; did not wait
+            self.assertEqual(data["mailbox"]["personal"]["status"], "pending")
+
+            # Let the probe finish and land its verdict before the temp cache is torn
+            # down -- the point is that the *request* did not wait for it, not that the
+            # check was abandoned.
+            released.set()
+            self.assertEqual(self._await_status("personal", "verified")["status"],
+                             "verified")
 
     def test_the_personal_mailbox_must_be_the_profiles_own_address(self):
         data = self._verify(address="someone.else@example.com")
@@ -362,6 +410,129 @@ class PressRouteTests(unittest.TestCase):
         _resp, reply = self._commit(items, ["M1"])
         self.assertNotIn("PWNED", reply.Body)
         self.assertIn("Ref A.", reply.Body)
+
+
+class InternalDomainTests(unittest.TestCase):
+    """`sender.is_internal` keys off the LAST SAVED identity, not Press's live mailbox.
+
+    The mailbox is Press's business. The internal-domain set it feeds is everyone's --
+    the mail list, org resolution and the SDS scan all classify senders with it. So an
+    unset, pending or rejected mailbox must not silently empty it, which is what used
+    to happen: the whole app changed behaviour because a Press check failed.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        tmp = Path(self._tmp)
+        self._orig = {k: getattr(config, k) for k in (
+            "CACHE_FILE", "SETTINGS_FILE", "TAGS_FILE", "TEMPLATES_DIR",
+            "AUTOMATIONS_FILE", "CUSTOMERS_FILE", "COMPOSE_TEMPLATES_FILE",
+            "PASSWORD_SETTINGS_FILE", "EXPERIMENTAL_FILE", "CUSTOMER_MATCH_FILE",
+            "VAULT_FILE", "CALENDAR_PINS_FILE", "MAILBOX_FILE", "CATEGORIES_FILE",
+            "WORKSPACE_DIR", "FILE_SERVER_DIR")}
+        for key, name in [
+                ("CACHE_FILE", "cache.json"), ("SETTINGS_FILE", "settings.json"),
+                ("TAGS_FILE", "tags.json"), ("AUTOMATIONS_FILE", "auto.json"),
+                ("CUSTOMERS_FILE", "cust.json"), ("COMPOSE_TEMPLATES_FILE", "ct.json"),
+                ("PASSWORD_SETTINGS_FILE", "pwd.json"), ("EXPERIMENTAL_FILE", "exp.json"),
+                ("CUSTOMER_MATCH_FILE", "cm.json"), ("VAULT_FILE", "vault.json"),
+                ("CALENDAR_PINS_FILE", "cal.json"), ("MAILBOX_FILE", "mailbox.json"),
+                ("CATEGORIES_FILE", "categories.json")]:
+            setattr(config, key, tmp / name)
+        config.TEMPLATES_DIR = tmp / "search_templates"
+        config.WORKSPACE_DIR = tmp / "workspace"
+        config.FILE_SERVER_DIR = tmp / "fileserver"
+        config.FILE_SERVER_DIR.mkdir(parents=True, exist_ok=True)
+
+        self.app = create_app()
+        self.client = self.app.test_client()
+        self.app.extensions["mail_store"].add_mails([
+            make_mail(id="C1", conversation_id="X1", subject="Hi",
+                      sender="Colleague", sender_email="colleague@example.com",
+                      received="2026-06-10 09:30:00", attachments=[]),
+        ])
+        self.template = self.client.post("/api/compose-templates", json={
+            "name": "Register",
+            "body": '{{ if(sender.is_internal, "INTERNAL", "EXTERNAL") }}',
+        }).get_json()
+
+    def tearDown(self):
+        for k, v in self._orig.items():
+            setattr(config, k, v)
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _register(self):
+        """How the sender of the one cached mail is classified, right now."""
+        data = self.client.post("/api/press/compute", json={"items": [
+            {"mail_id": "C1", "template_id": self.template["id"], "row": {}}]}).get_json()
+        return data["results"][0]["plan"]["body"].strip()
+
+    def _verify_personal(self, address, profile=None):
+        with mock.patch.object(outlook, "is_available", return_value=True), \
+             mock.patch.object(outlook, "profile_address",
+                               return_value=profile or address):
+            return self.client.post("/api/press/mailbox", json={
+                "kind": "personal", "address": address}).get_json()
+
+    def _clear_personal(self):
+        return self.client.post("/api/press/mailbox", json={
+            "kind": "personal", "address": ""}).get_json()
+
+    def test_the_sender_is_external_until_a_mailbox_is_proved(self):
+        self.assertEqual(self._register(), "EXTERNAL")
+
+    def test_a_verified_personal_mailbox_makes_its_domain_internal(self):
+        self._verify_personal("me@example.com")
+        self.assertEqual(self._register(), "INTERNAL")
+
+    def test_clearing_the_mailbox_keeps_the_saved_internal_domain(self):
+        self._verify_personal("me@example.com")
+        box = self._clear_personal()
+        self.assertEqual(box["mailbox"]["status"], "unset")   # Press is locked again...
+        self.assertFalse(box["ready"])
+        self.assertEqual(self._register(), "INTERNAL")        # ...but identity survives
+
+    def test_a_rejected_mailbox_keeps_the_saved_internal_domain(self):
+        self._verify_personal("me@example.com")
+        # The user retypes a mailbox that is not this profile's: rejected, address
+        # dropped. That is Press's problem and must not reclassify everyone's mail.
+        data = self._verify_personal("someone@elsewhere.com", profile="me@example.com")
+        self.assertEqual(data["mailbox"]["status"], "unset")
+        self.assertEqual(self._register(), "INTERNAL")
+
+    def test_a_deferred_check_keeps_the_saved_internal_domain(self):
+        self._verify_personal("me@example.com")
+        with mock.patch.object(outlook, "is_available", return_value=False), \
+             mock.patch.object(outlook, "profile_address",
+                               side_effect=outlook.OutlookUnavailableError("no Outlook")):
+            data = self.client.post("/api/press/mailbox", json={
+                "kind": "personal", "address": "me@example.com"}).get_json()
+        self.assertEqual(data["mailbox"]["status"], "pending")
+        self.assertEqual(self._register(), "INTERNAL")
+
+    def test_proving_a_different_domain_moves_the_internal_domain(self):
+        self._verify_personal("me@example.com")
+        self.assertEqual(self._register(), "INTERNAL")
+        self._verify_personal("me@newcorp.co.jp")
+        # The identity moved, so the old colleague is now an outsider.
+        self.assertEqual(self._register(), "EXTERNAL")
+        self.assertEqual(
+            self.app.extensions["mailbox_store"].own_address(), "me@newcorp.co.jp")
+
+    def test_reproving_the_same_domain_leaves_the_saved_address_alone(self):
+        self._verify_personal("me@example.com")
+        self._verify_personal("me.again@example.com")
+        self.assertEqual(
+            self.app.extensions["mailbox_store"].own_address(), "me@example.com")
+        self.assertEqual(self._register(), "INTERNAL")
+
+    def test_a_shared_mailbox_never_touches_the_internal_domain(self):
+        with mock.patch.object(outlook, "is_available", return_value=True), \
+             mock.patch.object(outlook, "check_mailbox_access", return_value=True):
+            self.client.post("/api/press/mailbox", json={
+                "kind": "shared", "address": "team@partner.com"})
+        self.assertEqual(self.app.extensions["mailbox_store"].own_address(), "")
+        self.assertEqual(self._register(), "EXTERNAL")
 
 
 if __name__ == "__main__":

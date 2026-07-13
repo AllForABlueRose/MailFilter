@@ -16,7 +16,7 @@ from flask import (
     request,
     send_file,
 )
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, InternalServerError
 
 import config
 
@@ -168,6 +168,23 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             return e
         return jsonify({"error": e.name, "description": e.description}), e.code
 
+    @bp.app_errorhandler(Exception)
+    def _api_crash_as_json(e):
+        """An /api/ call that *crashes* also answers with JSON, not Flask's HTML page.
+
+        The handler above covers deliberate ``abort()``s. This one covers the bugs: an
+        unhandled exception used to return an HTML 500 page, which every
+        ``await res.json()`` in the frontend then choked on -- turning one broken
+        endpoint into an app that looks dead. The reason is logged with its traceback
+        and handed to the caller, which is what the UI shows.
+        """
+        if isinstance(e, HTTPException):       # a deliberate abort(): handled above
+            return _api_error_as_json(e)
+        log.exception("Unhandled exception on %s", request.path)
+        if not request.path.startswith("/api/"):
+            return InternalServerError()       # a page: Flask's standard 500
+        return jsonify({"error": "Internal Server Error", "description": str(e)}), 500
+
     def view_model(mail, query, resolve_org=None, hide_safe_links=False):
         view = to_view_model(mail, query.main, query.optional,
                              query.attachment_blacklist, query.links_blacklist,
@@ -185,13 +202,15 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
     def _internal_domains():
         """The domains ``sender.is_internal`` is true for, built once per request.
 
-        The user's own domain comes from the mailbox they **verified** against Outlook
-        (an unverified one proves nothing about who you are, so it is not used); the
-        rest come from the Partner organizations in Customer Management. See
-        ``customers.internal_domains``."""
-        personal = mailbox_store.get("personal") or {}
-        own = personal["address"] if personal.get("status") == "verified" else ""
-        return customers.internal_domains(customer_store.snapshot(), own)
+        The user's own domain comes from the **last saved** identity -- the address a
+        personal mailbox verification proved, held stickily by ``mailbox_store``. It is
+        deliberately *not* read off the live mailbox status: Press's mailbox may be
+        unset, pending or rejected at any moment, and none of that should change how
+        the mail list, org resolution or the SDS scan classify a sender. The rest of
+        the domains come from the Root/Partner organizations in Customer Management.
+        See ``customers.internal_domains``."""
+        return customers.internal_domains(customer_store.snapshot(),
+                                          mailbox_store.own_address())
 
     def _mail_org_resolver():
         """The per-request mail->org resolver: the Brute Force keyword tier is active
@@ -308,6 +327,10 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             name, snapshot = template_store.import_image(upload.read())
         except (ValueError, KeyError, TypeError):
             abort(400, description="not a valid template image")
+        except OSError as e:
+            # The image decoded, but the file could not be written (a locked or
+            # read-only destination). Say so rather than 500 with a traceback.
+            abort(500, description=f"could not write the template file: {e}")
         return jsonify({"imported": name, **snapshot})
 
     @bp.post("/refresh")
@@ -1158,18 +1181,25 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
             abort(400, description=f"at most {config.PRESS_MAX_ITEMS} mail items at a time")
         return [i for i in items if isinstance(i, dict)]
 
+    def _verify_pending_mailboxes():
+        for kind in mailbox_store.pending_kinds():
+            box = mailbox_store.get(kind)
+            _verify_mailbox(kind, box["address"])
+
     @bp.get("/api/press/state")
     def press_state():
         """Everything Press needs on entry: the mailboxes and whether they are proved,
         whether Outlook is reachable at all, the templates, and the picker's filters.
 
         A `pending` mailbox (named while Outlook was down) is re-checked here, so simply
-        opening Press once Outlook is running completes the deferred verification."""
+        opening Press once Outlook is running completes the deferred verification. That
+        check runs **off the request thread**: it is a COM call against a mailbox that
+        may not answer, and entering a tab must never wait on Outlook. The verdict lands
+        in the store, and Press picks it up on its follow-up read."""
         available = outlook.is_available()
-        if available:
-            for kind in mailbox_store.pending_kinds():
-                box = mailbox_store.get(kind)
-                _verify_mailbox(kind, box["address"])
+        if available and mailbox_store.pending_kinds():
+            threading.Thread(target=_verify_pending_mailboxes,
+                             name="press-verify-pending", daemon=True).start()
         return jsonify({
             "mailbox": mailbox_store.snapshot(),
             "outlook_available": available,
@@ -1199,6 +1229,10 @@ def create_blueprint(store, settings, tag_store, template_store, automation_stor
                     return mailbox_store.set_address(
                         kind, "", "unset",
                         f"that is not this Outlook profile's mailbox (it is {mine})")
+                # A proved personal mailbox is the app's identity, so it also updates
+                # the saved internal domain -- but only on the first detection, or when
+                # the domain actually changed. See mailbox_store.remember_own_address.
+                mailbox_store.remember_own_address(address)
                 return mailbox_store.set_address(kind, address, "verified")
             outlook.check_mailbox_access(address)
             return mailbox_store.set_address(kind, address, "verified")

@@ -37,4 +37,9 @@ if __name__ == "__main__":
     app.extensions["mail_scheduler"].start()
     # Periodic automation runner (enabled automations whose interval has elapsed).
     app.extensions["automation_scheduler"].start()
-    app.run(host=config.HOST, port=config.PORT, debug=False)
+    # threaded=True: the dev server otherwise serves ONE request at a time, so a slow
+    # Outlook COM call in a Press mailbox probe would stall the mail poll, the search
+    # templates, the workspace and every other request behind it. Every store already
+    # guards its state with an RLock (see docs/system-design/14), so concurrent
+    # requests are safe.
+    app.run(host=config.HOST, port=config.PORT, debug=False, threaded=True)

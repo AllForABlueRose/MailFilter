@@ -792,6 +792,33 @@ class RouteTests(unittest.TestCase):
         oid = self.client.post("/api/organizations", json={"name": "A"}).get_json()["id"]
         self.assertEqual(self.client.post(f"/api/organizations/{oid}/domains", json=[1]).status_code, 400)
 
+    # ----- a crash inside /api/ must still answer JSON -----
+
+    def test_an_unhandled_exception_in_an_api_route_answers_json(self):
+        """Not HTML.
+
+        The frontend parses every /api/ response as JSON. When a route crashed, Flask
+        returned its HTML 500 page, so `await res.json()` threw and the caller aborted
+        mid-flight -- one broken endpoint left the whole UI looking dead (the header
+        kept its "Unknown"/"Never" placeholders). The reason must reach the caller.
+        """
+        with mock.patch.object(self.store, "snapshot",
+                               side_effect=RuntimeError("boom")):
+            resp = self.client.get("/api/mail")
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.mimetype, "application/json")
+        self.assertIn("boom", resp.get_json()["description"])
+
+    def test_a_deliberate_abort_still_answers_json(self):
+        resp = self.client.post("/api/templates/import")   # no file uploaded
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.mimetype, "application/json")
+        self.assertEqual(resp.get_json()["description"], "no file uploaded")
+
+    def test_a_page_route_still_gets_html(self):
+        self.assertEqual(self.client.get("/nope").status_code, 404)
+        self.assertEqual(self.client.get("/nope").mimetype, "text/html")
+
 
 if __name__ == "__main__":
     unittest.main()

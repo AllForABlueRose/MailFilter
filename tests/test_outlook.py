@@ -8,10 +8,13 @@ it is exercised here with fake Outlook items.
 """
 
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
+import config
 from mailfilter import outlook
 from mailfilter.store import MailStore
 
@@ -334,6 +337,135 @@ class ExchangeAddressResolutionTests(unittest.TestCase):
     def test_recipient_dn_falls_back_to_raw_when_unresolvable(self):
         rcpt = _FakeRecipient(self.EX_DN, _FakeAddressEntry())
         self.assertEqual(outlook._recipient_email(rcpt), self.EX_DN)
+
+
+class _FakeComError(Exception):
+    """Stands in for pywintypes.com_error."""
+
+
+class _FakePywintypes:
+    com_error = _FakeComError
+
+
+class _FakePythoncom:
+    @staticmethod
+    def CoInitialize():
+        pass
+
+    @staticmethod
+    def CoUninitialize():
+        pass
+
+
+class _FakeInbox:
+    class Items:
+        Count = 3
+
+
+class _FakeMailboxRecipient:
+    def __init__(self, resolved=True):
+        self.Resolved = resolved
+
+    def Resolve(self):
+        pass
+
+
+class _FakeMailboxNamespace:
+    """Records what GetSharedDefaultFolder was handed, and can deny access."""
+
+    def __init__(self, recipient, deny=False):
+        self._recipient = recipient
+        self._deny = deny
+        self.shared_folder_args = None
+
+    def CreateRecipient(self, address):
+        self.created_for = address
+        return self._recipient
+
+    def GetSharedDefaultFolder(self, recipient, folder_id):
+        self.shared_folder_args = (recipient, folder_id)
+        if self._deny:
+            raise _FakeComError("access denied")
+        return _FakeInbox()
+
+
+class CheckMailboxAccessTests(unittest.TestCase):
+    """The shared-mailbox probe, driven through the real code path against fake COM.
+
+    This is the path that shipped broken: it referenced ``config.OUTLOOK_INBOX_FOLDER``
+    while the module imports the name bare, so every shared-mailbox check raised
+    ``NameError`` and 500'd. Nothing covered it, so nothing caught it.
+    """
+
+    def _run(self, namespace, address="shared@example.com"):
+        app = mock.Mock()
+        app.GetNamespace.return_value = namespace
+        with mock.patch.object(outlook, "_import_pywin32",
+                               return_value=(_FakePythoncom, _FakePywintypes, None)), \
+             mock.patch.object(outlook, "_dispatch", return_value=app):
+            return outlook.check_mailbox_access(address)
+
+    def test_opens_the_shared_inbox_with_the_configured_folder_id(self):
+        ns = _FakeMailboxNamespace(_FakeMailboxRecipient())
+        self.assertTrue(self._run(ns))
+        recipient, folder_id = ns.shared_folder_args
+        self.assertEqual(folder_id, config.OUTLOOK_INBOX_FOLDER)
+        self.assertEqual(ns.created_for, "shared@example.com")
+
+    def test_a_denied_mailbox_is_reported_not_raised_raw(self):
+        ns = _FakeMailboxNamespace(_FakeMailboxRecipient(), deny=True)
+        with self.assertRaises(outlook.OutlookUnavailableError) as cm:
+            self._run(ns)
+        self.assertIn("access", str(cm.exception))
+
+    def test_an_unresolvable_address_is_rejected(self):
+        ns = _FakeMailboxNamespace(_FakeMailboxRecipient(resolved=False))
+        with self.assertRaises(outlook.OutlookUnavailableError) as cm:
+            self._run(ns)
+        self.assertIn("could not resolve", str(cm.exception))
+
+    def test_a_blank_address_is_rejected_before_any_com_call(self):
+        with self.assertRaises(outlook.OutlookUnavailableError):
+            outlook.check_mailbox_access("")
+
+
+class ProbeTimeoutTests(unittest.TestCase):
+    """A probe that never answers must not hold the request thread.
+
+    Outlook can block indefinitely (a security prompt, a mailbox that is not cached
+    locally). Before the deadline this froze the single-threaded dev server outright.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.object(outlook, "OUTLOOK_PROBE_TIMEOUT_SECONDS", 0.05)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.released = threading.Event()
+        self.addCleanup(self.released.set)   # let the abandoned worker finish
+
+    def _hang(self, *args, **kwargs):
+        self.released.wait(10)
+        return "too late"
+
+    def test_check_mailbox_access_times_out(self):
+        with mock.patch.object(outlook, "_check_mailbox_access", self._hang):
+            with self.assertRaises(outlook.OutlookUnavailableError) as cm:
+                outlook.check_mailbox_access("shared@example.com")
+        self.assertIn("did not answer", str(cm.exception))
+
+    def test_profile_address_times_out(self):
+        with mock.patch.object(outlook, "_profile_address", self._hang):
+            with self.assertRaises(outlook.OutlookUnavailableError):
+                outlook.profile_address()
+
+    def test_is_available_is_false_when_outlook_does_not_answer(self):
+        with mock.patch.object(outlook, "_is_available", self._hang):
+            self.assertFalse(outlook.is_available())
+
+    def test_a_probe_that_answers_in_time_returns_its_value(self):
+        with mock.patch.object(outlook, "_profile_address",
+                               return_value="me@example.com"):
+            self.assertEqual(outlook.profile_address(), "me@example.com")
 
 
 try:

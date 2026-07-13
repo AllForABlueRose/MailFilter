@@ -121,5 +121,70 @@ class MailboxStoreTests(unittest.TestCase):
         self.assertEqual(store.snapshot()["personal"]["status"], "unset")
 
 
+class OwnAddressTests(unittest.TestCase):
+    """The saved identity the app's internal domain comes from.
+
+    Sticky by design: Press's mailbox may be unset, pending or rejected at any moment,
+    and none of that may change how the rest of the app classifies a sender.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self.path = Path(self._tmp) / "mailbox.json"
+        self.store = MailboxStore(self.path)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_starts_blank(self):
+        self.assertEqual(self.store.own_address(), "")
+
+    def test_the_first_detection_sets_it(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.assertEqual(self.store.own_address(), "me@mycorp.com")
+
+    def test_the_same_domain_does_not_overwrite_it(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.store.remember_own_address("someone.else@mycorp.com")
+        self.assertEqual(self.store.own_address(), "me@mycorp.com")
+
+    def test_a_different_domain_overwrites_it(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.store.remember_own_address("me@newcorp.co.jp")
+        self.assertEqual(self.store.own_address(), "me@newcorp.co.jp")
+
+    def test_a_blank_address_never_clears_it(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.store.remember_own_address("")
+        self.store.remember_own_address(None)
+        self.assertEqual(self.store.own_address(), "me@mycorp.com")
+
+    def test_it_survives_the_mailbox_being_rejected_or_unset(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.store.set_address("personal", "me@mycorp.com", "verified")
+        self.store.set_address("personal", "", "unset", "wrong mailbox")
+        self.assertEqual(self.store.get("personal")["status"], "unset")
+        self.assertEqual(self.store.own_address(), "me@mycorp.com")   # still known
+
+    def test_it_survives_a_deferred_check(self):
+        self.store.remember_own_address("me@mycorp.com")
+        self.store.set_address("personal", "me@mycorp.com", "pending", "no Outlook")
+        self.assertEqual(self.store.own_address(), "me@mycorp.com")
+
+    def test_it_is_capped(self):
+        self.store.remember_own_address("x" * (config.MAILBOX_ADDRESS_MAX + 50))
+        self.assertEqual(len(self.store.own_address()), config.MAILBOX_ADDRESS_MAX)
+
+    def test_it_persists_encoded_and_reloads(self):
+        self.store.remember_own_address("me@mycorp.com")
+        reloaded = MailboxStore(self.path)
+        reloaded.load()
+        self.assertEqual(reloaded.own_address(), "me@mycorp.com")
+
+    def test_update_cannot_set_it(self):
+        self.store.update({"own_address": "attacker@evil.com", "cc_enabled": False})
+        self.assertEqual(self.store.own_address(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

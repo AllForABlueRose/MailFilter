@@ -20,6 +20,7 @@ from config import (
     FETCH_BATCH_SIZE,
     FETCH_LOOKBACK,
     OUTLOOK_INBOX_FOLDER,
+    OUTLOOK_PROBE_TIMEOUT_SECONDS,
     RECEIVED_FORMAT,
 )
 
@@ -517,13 +518,56 @@ def fetch_attachment(entry_id, index):
 # ----------------------------------------------------------------------------
 # Mailbox probes (Press): prove a mailbox before anything is drafted from it
 # ----------------------------------------------------------------------------
+#
+# Every probe below runs inside a Flask request, and every one of them blocks on COM:
+# ``_dispatch`` may *launch* Outlook, ``Resolve()`` queries the Exchange directory, and
+# opening a shared Inbox is a network round-trip. So each is time-boxed by
+# ``_run_with_timeout``: on expiry the probe reports Outlook as unreachable, which
+# leaves the mailbox `pending` (the deferred-check state the store already models)
+# instead of hanging the request.
+
+def _run_with_timeout(probe, what):
+    """Run a blocking COM ``probe`` on a worker thread, bounded by a deadline.
+
+    A COM call cannot be cancelled, so on expiry the worker is **abandoned, not
+    killed** -- it is a daemon and does its own CoInitialize/CoUninitialize, so it
+    unwinds by itself whenever Outlook finally answers. What the deadline buys is that
+    the *caller* always returns.
+    """
+    outcome = {}
+
+    def target():
+        try:
+            outcome["value"] = probe()
+        except BaseException as e:                      # re-raised on the caller's thread
+            outcome["error"] = e
+
+    thread = threading.Thread(target=target, name="outlook-probe", daemon=True)
+    thread.start()
+    thread.join(OUTLOOK_PROBE_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        raise OutlookUnavailableError(
+            f"Outlook did not answer within {OUTLOOK_PROBE_TIMEOUT_SECONDS}s "
+            f"while trying to {what}")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
+
 
 def is_available():
     """Whether classic Outlook can be reached over COM right now.
 
-    Cheap and side-effect free -- Press uses it to decide whether a mailbox check can
-    run at all, or must be deferred (recorded as ``pending``).
+    Side-effect free -- Press uses it to decide whether a mailbox check can run at all,
+    or must be deferred (recorded as ``pending``). An Outlook that does not answer
+    within the deadline counts as unreachable.
     """
+    try:
+        return _run_with_timeout(_is_available, "reach Outlook")
+    except OutlookUnavailableError:
+        return False
+
+
+def _is_available():
     try:
         pythoncom, pywintypes, win32com = _import_pywin32()
     except OutlookUnavailableError:
@@ -544,9 +588,13 @@ def profile_address():
     This is what a claimed *personal* mailbox is checked against: not "can you open
     it" (you may have rights to a colleague's mailbox) but "is it yours".
 
-    Raises OutlookUnavailableError if Outlook can't be reached; returns "" if the
-    profile exposes no resolvable address.
+    Raises OutlookUnavailableError if Outlook can't be reached (or does not answer in
+    time); returns "" if the profile exposes no resolvable address.
     """
+    return _run_with_timeout(_profile_address, "read the Outlook profile")
+
+
+def _profile_address():
     pythoncom, pywintypes, win32com = _import_pywin32()
     pythoncom.CoInitialize()
     try:
@@ -574,13 +622,18 @@ def check_mailbox_access(address):
     lazy and would otherwise defer the permission error).
 
     Returns True on success. Raises OutlookUnavailableError with a human reason when
-    Outlook can't be reached, the address doesn't resolve, or access is denied --
-    a raw COM permission error is converted here rather than escaping as a 500.
+    Outlook can't be reached (or does not answer in time), the address doesn't
+    resolve, or access is denied -- a raw COM permission error is converted here
+    rather than escaping as a 500.
     """
     address = (address or "").strip()
     if not address:
         raise OutlookUnavailableError("no mailbox address given")
+    return _run_with_timeout(lambda: _check_mailbox_access(address),
+                             f"open {address!r}")
 
+
+def _check_mailbox_access(address):
     pythoncom, pywintypes, win32com = _import_pywin32()
     pythoncom.CoInitialize()
     try:
@@ -592,7 +645,7 @@ def check_mailbox_access(address):
             raise OutlookUnavailableError(
                 f"Outlook could not resolve {address!r} (check the address)")
         try:
-            inbox = namespace.GetSharedDefaultFolder(recipient, config.OUTLOOK_INBOX_FOLDER)
+            inbox = namespace.GetSharedDefaultFolder(recipient, OUTLOOK_INBOX_FOLDER)
             int(inbox.Items.Count)  # force the lazy open: a denial surfaces HERE
         except pywintypes.com_error as e:
             raise OutlookUnavailableError(

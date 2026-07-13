@@ -5,11 +5,14 @@ export/import feature uses); the folder is the storage, so these tests assert on
 the files on disk as well as the in-memory index.
 """
 
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from mailfilter import imgcodec
+from mailfilter import imgcodec, util
 from mailfilter.settings_store import DEFAULTS, MAX_LEN
 from mailfilter.template_store import (
     MAX_NAME_LEN, MAX_TEMPLATES, TemplateStore, _to_png)
@@ -178,6 +181,65 @@ class LoadTests(unittest.TestCase):
             reloaded = TemplateStore(directory)
             reloaded.load()
             self.assertEqual(reloaded.snapshot()["names"], ["Good"])
+
+
+class WindowsWriteTests(unittest.TestCase):
+    """The template write goes through the shared atomic-write helper.
+
+    It used to call ``os.replace`` directly, so a Windows WinError 5 -- Defender or the
+    Search Indexer briefly holding a handle on the freshly written file, or a read-only
+    destination -- escaped as a 500 on import. Every other store already wrote through
+    ``util.atomic_replace``, which retries; this one didn't.
+    """
+
+    def setUp(self):
+        self.store = _store()
+
+    def test_a_transient_permission_error_is_retried(self):
+        real_replace = os.replace
+        calls = []
+
+        def flaky(temp, path):
+            calls.append(path)
+            if len(calls) == 1:
+                raise PermissionError(5, "Access is denied")
+            return real_replace(temp, path)
+
+        with mock.patch.object(util.os, "replace", side_effect=flaky):
+            self.store.save("PKI", {"main": "x"})
+
+        self.assertEqual(len(calls), 2)                       # failed once, then wrote
+        self.assertEqual(self.store.get("PKI")["main"], "x")
+        self.assertTrue(self.store._paths["PKI"].exists())
+
+    def test_a_permanently_denied_write_still_raises(self):
+        with mock.patch.object(util.os, "replace",
+                               side_effect=PermissionError(5, "Access is denied")):
+            with self.assertRaises(PermissionError):
+                self.store.save("PKI", {"main": "x"})
+
+    def test_a_read_only_destination_is_overwritten(self):
+        # POSIX rename ignores the destination's mode, so Windows is simulated: deny
+        # the replace while the destination is read-only, allow it once cleared. Retries
+        # alone can never win this one -- the attribute has to come off.
+        real_replace = os.replace
+
+        def windows_like(temp, path):
+            if not os.stat(path).st_mode & stat.S_IWUSR:
+                raise PermissionError(5, "Access is denied")
+            return real_replace(temp, path)
+
+        self.store.save("PKI", {"main": "first"})
+        path = self.store._paths["PKI"]
+        path.chmod(stat.S_IREAD)                             # the read-only attribute
+
+        with mock.patch.object(util.os, "replace", side_effect=windows_like):
+            self.store.save("PKI", {"main": "second"})
+
+        self.assertEqual(self.store.get("PKI")["main"], "second")
+        reloaded = TemplateStore(path.parent)
+        reloaded.load()
+        self.assertEqual(reloaded.get("PKI")["main"], "second")
 
 
 if __name__ == "__main__":

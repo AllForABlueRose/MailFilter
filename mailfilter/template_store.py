@@ -94,7 +94,7 @@ class TemplateStore:
                 raise ValueError(f"template limit reached ({MAX_TEMPLATES})")
             path = self._paths.get(name) or self._new_path(name)
             self._dir.mkdir(parents=True, exist_ok=True)
-            _atomic_write(path, _to_png(name, body))
+            util.atomic_write_bytes(path, _to_png(name, body))
             self._templates[name] = body
             self._paths[name] = path
             return self.snapshot()
@@ -153,13 +153,6 @@ def _from_png(data):
     if not isinstance(parsed, dict):
         raise ValueError("template payload is not an object")
     return parsed["name"], parsed.get("settings") or {}
-
-
-def _atomic_write(path, data):
-    tmp = path.with_name(path.name + ".tmp")
-    with open(tmp, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
 
 
 def _clean_name(name):

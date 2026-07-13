@@ -142,6 +142,13 @@ VAULT_TEMP_HIDE_AFTER_DAYS = 7
 
 # Outlook
 OUTLOOK_INBOX_FOLDER = 6  # olFolderInbox
+# Deadline for the mailbox probes (outlook.profile_address / check_mailbox_access),
+# which run inside a request. Each blocks on COM -- Dispatch may launch Outlook,
+# Resolve() hits the Exchange directory, and opening a shared Inbox is a network
+# round-trip -- so without a deadline one probe can hang a request indefinitely. On
+# expiry the probe reports Outlook as unreachable and the mailbox is left "pending",
+# to be proved on a later attempt.
+OUTLOOK_PROBE_TIMEOUT_SECONDS = 15
 
 # Behaviour
 REFRESH_INTERVAL_SECONDS = 3600

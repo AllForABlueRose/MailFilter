@@ -23,7 +23,7 @@ async function loadPress(){
     if(!pressItems.length){ resetPressMails(); }
 }
 
-async function loadPressState(){
+async function loadPressState(retryPending = true){
     let data;
     try {
         data = await (await fetch('/api/press/state')).json();
@@ -35,6 +35,16 @@ async function loadPressState(){
     if((data.filters || []).length){ pressFilters = data.filters; }
     renderPressMailbox();
     renderPressTemplateBar();
+
+    // A deferred check runs off the request thread (so entering the tab never waits on
+    // Outlook), which means its verdict lands just after this response. Read the state
+    // back once so the user sees it without reopening the tab.
+    const boxes = data.mailbox || {};
+    const anyPending = Object.keys(boxes).some(
+        k => boxes[k] && boxes[k].status === 'pending');
+    if(retryPending && anyPending && data.outlook_available){
+        setTimeout(() => loadPressState(false), 3000);
+    }
 }
 
 // ----- the mailbox: nothing drafts until Outlook has proved it -----

@@ -17,6 +17,15 @@ This store only records the verdict, so it stays free of COM and testable anywhe
 type their address, and the check is deferred rather than refused -- it runs the next
 time Outlook is reachable. Until then Press keeps every draft control disabled.
 
+One field outlives that lifecycle: ``own_address``, the last address a *personal*
+verification proved. It is what the rest of the app derives its **internal domain** from
+(``routes._internal_domains`` -> ``customers.internal_domains``), and it is deliberately
+**sticky** -- set on the first successful detection, overwritten only when a detection
+proves a *different* domain, and never cleared by a failed, rejected or deferred check.
+Press's mailbox is allowed to be broken; the mail list, ``sender.is_internal``, org
+resolution and the SDS scan are not allowed to change behaviour because of it. That is
+the whole of this store's reach outside Press.
+
 Guarded by an ``RLock``, written atomically, encoded at rest through the same
 ``crypto`` seam as the other stores. It carries no secrets -- an address is not one.
 """
@@ -28,7 +37,7 @@ from pathlib import Path
 
 import config
 
-from . import persistence
+from . import persistence, util
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +48,9 @@ DEFAULTS = {
     "shared": dict(DEFAULT_MAILBOX),
     "selected": "personal",   # which mailbox drafts are sent on behalf of / CC'd to
     "cc_enabled": True,       # add the selected mailbox to the reply's CC
+    # The last address a *personal* verification proved, kept independently of that
+    # mailbox's live status -- see `remember_own_address`.
+    "own_address": "",
 }
 
 
@@ -72,6 +84,7 @@ def coerce(raw, base=None):
         "shared": _coerce_mailbox((raw or {}).get("shared"), base.get("shared")),
         "selected": base.get("selected", "personal"),
         "cc_enabled": bool(base.get("cc_enabled", True)),
+        "own_address": str(base.get("own_address") or ""),
     }
     if isinstance(raw, dict):
         selected = str(raw.get("selected") or "")
@@ -79,6 +92,9 @@ def coerce(raw, base=None):
             out["selected"] = selected
         if "cc_enabled" in raw and raw["cc_enabled"] is not None:
             out["cc_enabled"] = bool(raw["cc_enabled"])
+        if "own_address" in raw:
+            out["own_address"] = str(raw.get("own_address") or "").strip()[
+                :config.MAILBOX_ADDRESS_MAX]
     return out
 
 
@@ -103,6 +119,7 @@ class MailboxStore:
                 "shared": dict(self._state["shared"]),
                 "selected": self._state["selected"],
                 "cc_enabled": self._state["cc_enabled"],
+                "own_address": self._state["own_address"],
             }
 
     def get(self, kind):
@@ -148,6 +165,38 @@ class MailboxStore:
             self._state[kind] = box
             self._save()
             return dict(box)
+
+    def own_address(self):
+        """The last address a *personal* verification proved. Sticky.
+
+        This -- not the personal mailbox's live status -- is what the rest of the app
+        keys "who am I" off (``routes._internal_domains``). Press's mailbox may be
+        unset, pending or rejected at any moment; the mail list, ``sender.is_internal``,
+        org resolution and the SDS scan must not change behaviour because of it.
+        """
+        with self._lock:
+            return self._state["own_address"]
+
+    def remember_own_address(self, address):
+        """Record ``address`` as the identity the app derives its internal domain from.
+
+        Written only when there is nothing saved yet (the first successful detection)
+        or when the new address is on a **different domain** than the saved one. A
+        re-verification on the same domain leaves it alone, and a blank address -- a
+        failed, rejected or deferred check -- never clears it. Returns the saved value.
+        """
+        with self._lock:
+            saved = self._state["own_address"]
+            new = (address or "").strip()[:config.MAILBOX_ADDRESS_MAX]
+            if not new:
+                return saved
+            if saved and util.domain_of(saved) == util.domain_of(new):
+                return saved
+            self._state["own_address"] = new
+            self._save()
+            log.info("Internal domain is now %r (from the verified personal mailbox)",
+                     util.domain_of(new))
+            return new
 
     def pending_kinds(self):
         """Kinds whose check was deferred because Outlook was unavailable."""

@@ -249,8 +249,20 @@ async function loadMail(){
     for(const [key, value] of Object.entries(currentSettings())){
         params.set(key, SETTINGS_BOOLS.includes(key) ? (value ? '1' : '') : value);
     }
-    const response = await fetch(`/api/mail?${params}`);
-    const data = await response.json();
+    let data;
+    try {
+        const response = await fetch(`/api/mail?${params}`);
+        data = await response.json();
+        if(!response.ok){ throw new Error(data.description || ('HTTP ' + response.status)); }
+    } catch(e){
+        // The poll failed (server down, or an error page where JSON was expected).
+        // Say so in the status box and leave the list standing: without this the
+        // function aborted here and the header kept its startup placeholders, which
+        // read as "the cache is empty" rather than "the server did not answer".
+        document.getElementById('fetchStatus').innerText =
+            'Status unavailable — the server did not answer (' + e.message + ')';
+        return;
+    }
 
     document.getElementById('lastRefresh').innerText = data.last_refresh;
     let status = data.fetch_status;

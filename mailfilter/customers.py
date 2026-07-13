@@ -14,7 +14,7 @@ it needs so there is no import cycle (``customer_store`` never imports this).
 import config
 from config import RECEIVED_FORMAT
 
-from . import expr
+from . import expr, util
 
 # Roles a contact/domain can hold within an org. Kept in sync with
 # config.ORG_DOMAIN_ROLES; "member" is normal staff, "representative" is a 3rd
@@ -35,7 +35,7 @@ def _normalize_email(email):
 
 
 def _domain_of(email):
-    return email.rsplit("@", 1)[-1]
+    return util.domain_of(email)
 
 
 def _people(mail):
