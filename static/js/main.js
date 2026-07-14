@@ -19,9 +19,6 @@ async function init(){
     document.getElementById('automationModal').addEventListener('click', e => {
         if(e.target.id === 'automationModal'){ closeAutomationBuilder(); }
     });
-    document.getElementById('bulkTemplateModal').addEventListener('click', e => {
-        if(e.target.id === 'bulkTemplateModal'){ closeBulkTemplateEditor(); }
-    });
     document.getElementById('passwordModal').addEventListener('click', e => {
         if(e.target.id === 'passwordModal'){ closePasswordSettings(); }
     });
@@ -41,13 +38,13 @@ async function init(){
         if(e.key === 'Escape'){
             // If a modal is open, Escape closes it; otherwise, on a Workshop
             // sub-screen it steps back to the hub (the Workshop "Back" binding).
-            const modalIds = ['threadModal','automationModal','bulkTemplateModal',
+            const modalIds = ['threadModal','automationModal',
                 'passwordModal','experimentalModal','suspectedCustomersModal',
                 'vaultEntryModal','calendarPinModal'];
             const anyModalOpen = modalIds.some(id => {
                 const m = document.getElementById(id); return m && !m.hidden;
             });
-            closeThread(); closeAutomationBuilder(); closeBulkTemplateEditor();
+            closeThread(); closeAutomationBuilder();
             closePasswordSettings(); closeExperimental(); closeSuspectedCustomers();
             closeVaultEntry(); closeCalendarPin();
             const wsView = document.getElementById('view-workshop');
@@ -63,7 +60,6 @@ async function init(){
         if(tag === 'BUTTON' || tag === 'A' || tag === 'TEXTAREA') return;
         if(!document.getElementById('threadModal').hidden) return;
         if(!document.getElementById('automationModal').hidden) return;
-        if(!document.getElementById('bulkTemplateModal').hidden) return;
         if(!document.getElementById('passwordModal').hidden) return;
         if(!document.getElementById('experimentalModal').hidden) return;
         if(!document.getElementById('suspectedCustomersModal').hidden) return;
